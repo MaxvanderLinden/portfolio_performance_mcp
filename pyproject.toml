@@ -1,0 +1,26 @@
+[project]
+name = "pp-mcp"
+version = "0.1.0"
+description = "Read-only MCP access to a local Portfolio Performance file"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["jpype1>=1.7.1", "fastmcp>=4.0"]
+
+[project.scripts]
+pp-read = "pp_mcp.server:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pp_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

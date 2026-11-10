@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# never commit portfolio data
+*.xml
+!tests/fixtures/demo.xml
+*.portfolio
+replica/
+staged/
+# local working notes
+PLAN.md
