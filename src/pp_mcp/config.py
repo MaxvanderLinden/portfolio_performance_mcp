@@ -8,12 +8,23 @@ can reach it. `scripts/refresh-replica.sh` keeps the replica current.
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_REPLICA = Path.home() / "pp-mcp" / "replica" / "portfolio.xml"
-DEFAULT_APP = Path("/Applications/PortfolioPerformance.app")
+
+def _default_app() -> Path:
+    """Where the official installers put Portfolio Performance on each platform."""
+    if sys.platform == "darwin":
+        return Path("/Applications/PortfolioPerformance.app")
+    if sys.platform == "win32":
+        return Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "PortfolioPerformance"
+    return Path("/opt/portfolio")
+
+
+DEFAULT_APP = _default_app()
 
 
 class ConfigError(Exception):
@@ -27,7 +38,13 @@ class Config:
 
     @property
     def plugins(self) -> Path:
-        return self.app_path / "Contents" / "Eclipse" / "plugins"
+        return plugins_dir(self.app_path)
+
+
+def plugins_dir(app_path: Path) -> Path:
+    """The Eclipse plugins folder: inside the bundle on macOS, at the top level elsewhere."""
+    mac = app_path / "Contents" / "Eclipse" / "plugins"
+    return mac if mac.is_dir() else app_path / "plugins"
 
 
 def load_config(env: Mapping[str, str] | None = None) -> Config:
@@ -39,9 +56,10 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
 
     if not app_path.is_dir():
         raise ConfigError(
-            f"Portfolio Performance not found at {app_path}. Set PP_APP_PATH to the .app bundle."
+            f"Portfolio Performance not found at {app_path}. Set PP_APP_PATH to its install folder "
+            "(the .app bundle on macOS)."
         )
-    if not (app_path / "Contents" / "Eclipse" / "plugins").is_dir():
+    if not plugins_dir(app_path).is_dir():
         raise ConfigError(f"{app_path} does not look like a Portfolio Performance bundle.")
 
     if not source.exists():

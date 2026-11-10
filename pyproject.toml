@@ -1,21 +1,44 @@
 [project]
 name = "pp-mcp"
 version = "0.1.0"
-description = "Read-only MCP access to a local Portfolio Performance file"
+description = "Read-only MCP server for a local Portfolio Performance file"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{ name = "Max van der Linden" }]
 requires-python = ">=3.11"
-dependencies = ["jpype1>=1.7.1", "fastmcp>=4.0"]
+keywords = ["mcp", "portfolio-performance", "portfolio", "investing", "claude"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "fastmcp>=4.0,<5",
+    "jpype1>=1.7.1,<2",
+    "mcp>=2.1,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/MaxvanderLinden/portfolio_performance_mcp"
+Issues = "https://github.com/MaxvanderLinden/portfolio_performance_mcp/issues"
 
 [project.scripts]
-pp-read = "pp_mcp.server:main"
+pp-mcp = "pp_mcp.server:main"
+pp-read = "pp_mcp.server:main"  # original name, kept so existing registrations keep working
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

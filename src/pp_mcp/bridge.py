@@ -8,9 +8,11 @@ values, performance, allocations — therefore matches what the application disp
 from __future__ import annotations
 
 import glob
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 import jpype
@@ -63,16 +65,35 @@ class ClientHandle:
         return stat.st_mtime_ns != self.mtime_ns or stat.st_size != self.size
 
 
-def find_libjvm(config: Config) -> Path:
-    matches = glob.glob(
-        str(config.plugins / "name.abuchen.zulu.jre*" / "jre" / "Contents" / "Home" / "lib" / "server" / "libjvm.dylib")
+def find_libjvm(config: Config, env: Mapping[str, str] | None = None) -> Path:
+    """Prefer the Java runtime bundled with Portfolio Performance; fall back to JAVA_HOME.
+
+    The JVM must be Java 21 or later (what PP is built for) and the same CPU architecture as this
+    Python interpreter, or JPype cannot load it.
+    """
+    env = os.environ if env is None else env
+    names = ("libjvm.dylib", "libjvm.so", "jvm.dll")
+    bundled_roots = [*sorted(config.plugins.glob("name.abuchen.zulu.jre*"), reverse=True), config.app_path / "jre"]
+    candidates = [
+        path
+        for root in bundled_roots
+        for name in names
+        for path in sorted(root.glob(f"**/{name}"))
+        if path.parent.name == "server"
+    ]
+    if env.get("JAVA_HOME"):
+        home = Path(env["JAVA_HOME"])
+        candidates += [home / "lib" / "server" / name for name in names[:2]]
+        candidates += [home / "bin" / "server" / "jvm.dll"]
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise BridgeError(
+        f"No Java runtime found: none bundled under {config.app_path}, and JAVA_HOME "
+        f"{'is ' + repr(env['JAVA_HOME']) if env.get('JAVA_HOME') else 'is not set'}. "
+        "Point JAVA_HOME at a Java 21+ runtime matching this Python's architecture."
     )
-    if not matches:
-        raise BridgeError(
-            f"No bundled JRE found under {config.plugins}. Portfolio Performance ships one; "
-            "if this build does not, set JAVA_HOME to a Java 21 runtime and adapt find_libjvm()."
-        )
-    return Path(sorted(matches)[-1])
 
 
 def find_classpath(config: Config) -> list[str]:
@@ -90,11 +111,14 @@ def start_jvm(config: Config | None = None) -> None:
             return
         config = config or load_config()
         if not jpype.isJVMStarted():
-            jpype.startJVM(
-                str(find_libjvm(config)),
-                classpath=find_classpath(config),
-                convertStrings=False,
-            )
+            libjvm = find_libjvm(config)
+            try:
+                jpype.startJVM(str(libjvm), classpath=find_classpath(config), convertStrings=False)
+            except OSError as exc:
+                raise BridgeError(
+                    f"Could not start the Java runtime at {libjvm}: {exc}. A common cause is a CPU "
+                    "architecture mismatch (e.g. an Intel Python with an Apple Silicon JRE)."
+                ) from exc
         _verify_scaling_factors()
         _started = True
 

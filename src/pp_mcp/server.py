@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from .bridge import get_client, start_jvm
+from .bridge import BridgeError, get_client, start_jvm
 from .config import ConfigError, load_config
 from .analytics_tools import ANALYTICS_TOOLS
 from .read_tools import TOOLS
@@ -44,7 +44,7 @@ def main() -> None:
     try:
         server = read_only()
         get_client()  # load the replica now, so a broken setup fails before we speak MCP
-    except ConfigError as exc:
+    except (ConfigError, BridgeError) as exc:
         raise SystemExit(f"pp-mcp: {exc}")
     server.run()
 

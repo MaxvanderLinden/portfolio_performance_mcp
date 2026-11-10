@@ -9,7 +9,7 @@ import sys
 
 import jpype
 
-from .bridge import fingerprint, get_client
+from .bridge import BridgeError, fingerprint, get_client
 from .config import ConfigError, load_config
 from .convert import account, money, portfolio, security
 
@@ -21,7 +21,11 @@ def main() -> int:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
 
-    handle = get_client(config)
+    try:
+        handle = get_client(config)
+    except BridgeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     client = handle.client
     print(f"source: {handle.path}  ({handle.size:,} bytes)")
 

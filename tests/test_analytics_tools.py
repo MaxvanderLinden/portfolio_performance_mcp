@@ -98,9 +98,25 @@ def test_dividends_match_the_transaction_ledger():
     dividends = at.get_dividends("MAX")
     ledger = rt.get_transactions(type="DIVIDENDS", limit=1000)
     assert dividends["payments"] == ledger["total_matching"]
-    assert dividends["total_net"] == pytest.approx(
-        sum(t["amount"]["amount"] for t in ledger["transactions"]), abs=0.01
-    )
+    base = dividends["currency"]
+    in_base = sum(t["amount"]["amount"] for t in ledger["transactions"] if t["amount"]["currency"] == base)
+    in_base_only = at.get_dividends("MAX", security="XX0000000001")["total_net"] + at.get_dividends(
+        "MAX", security="XX0000000003"
+    )["total_net"]
+    assert in_base_only == pytest.approx(in_base, abs=0.01)
+
+
+def test_foreign_dividends_are_converted_to_the_base_currency():
+    """The demo fixture pays USD dividends into a USD account; totals must not mix currencies."""
+    usd = at.get_dividends("MAX", security="XX0000000005")
+    raw = [
+        t for t in rt.get_transactions(type="DIVIDENDS", security="XX0000000005", limit=1000)["transactions"]
+    ]
+    assert raw and {t["amount"]["currency"] for t in raw} == {"USD"}
+    assert usd["currency"] == "EUR"
+    assert usd["payments"] == len(raw)
+    assert usd["total_net"] != pytest.approx(sum(t["amount"]["amount"] for t in raw), abs=0.01)
+    assert 0 < usd["total_net"]
 
 
 def test_dividends_group_by_security():

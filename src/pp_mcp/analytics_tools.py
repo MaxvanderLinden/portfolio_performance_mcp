@@ -8,6 +8,7 @@ the application shows for the same reporting period.
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 from typing import Any
 
 import jpype
@@ -289,7 +290,10 @@ def get_dividends(
     security: str | None = None,
     by: str = "year",
 ) -> dict[str, Any]:
-    """Dividend income, grouped by year or by security.
+    """Dividend income in the base currency, grouped by year or by security.
+
+    Payments in other currencies are converted at the exchange rate on the payment date, as
+    Portfolio Performance does in its own dividend views.
 
     Args:
         period: reporting period. Use an alias (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 10Y, YTD, MTD, QTD, WTD, MAX), a calendar year (2025), an explicit range (2024-01-01..2024-12-31), or a Portfolio Performance code (L1Y0 = last year, D30 = last 30 days, T30 = last 30 trading days, S2020-01-01 = since).
@@ -304,10 +308,15 @@ def get_dividends(
     if grouping not in {"year", "security"}:
         raise ToolError("by must be 'year' or 'security'")
 
+    converter = handle.converter
+    currency = str(converter.getTermCurrency())
+
+    def in_base(when: Any, value: Any) -> Decimal:
+        return convert.money_of(converter.convert(when, value)).amount
+
     groups: dict[str, dict[str, Any]] = {}
-    total = 0.0
+    total = Decimal(0)
     count = 0
-    currency = str(handle.client.getBaseCurrency())
 
     for java_account in handle.client.getAccounts():
         for java_transaction in java_account.getTransactions():
@@ -315,29 +324,42 @@ def get_dividends(
                 continue
             if wanted is not None and java_transaction.getSecurity() != wanted:
                 continue
-            info = convert.transaction(java_transaction, account_name=str(java_account.getName()))
-            if not (start < info.datetime.date() <= end):
+            when = java_transaction.getDateTime()
+            day = convert.datetime_of(when).date()
+            if not (start < day <= end):
                 continue
 
-            key = str(info.datetime.year) if grouping == "year" else (info.security or "unknown")
-            bucket = groups.setdefault(key, {"key": key, "gross": 0.0, "net": 0.0, "taxes": 0.0, "count": 0})
-            bucket["gross"] += float(info.gross.amount) if info.gross else 0.0
-            bucket["net"] += float(info.amount.amount)
-            bucket["taxes"] += float(info.taxes.amount) if info.taxes else 0.0
+            net = in_base(when, java_transaction.getMonetaryAmount())
+            gross = in_base(when, java_transaction.getGrossValue())
+            taxes = sum(
+                (in_base(when, unit.getAmount())
+                 for unit in java_transaction.getUnits().toList()
+                 if str(unit.getType().name()) == "TAX"),
+                Decimal(0),
+            )
+
+            held = java_transaction.getSecurity()
+            key = str(day.year) if grouping == "year" else (str(held.getName()) if held is not None else "unknown")
+            bucket = groups.setdefault(
+                key, {"key": key, "gross": Decimal(0), "net": Decimal(0), "taxes": Decimal(0), "count": 0}
+            )
+            bucket["gross"] += gross
+            bucket["net"] += net
+            bucket["taxes"] += taxes
             bucket["count"] += 1
-            total += float(info.amount.amount)
+            total += net
             count += 1
 
     rows = sorted(groups.values(), key=lambda row: row["key"])
     for row in rows:
         for field in ("gross", "net", "taxes"):
-            row[field] = round(row[field], 2)
+            row[field] = round(float(row[field]), 2)
 
     return {
         "period": {"requested": period, "code": code, **_interval_dates(interval)},
         "grouped_by": grouping,
         "currency": currency,
-        "total_net": round(total, 2),
+        "total_net": round(float(total), 2),
         "payments": count,
         "groups": rows,
     }

@@ -7,11 +7,12 @@ The file is built with Portfolio Performance's own model classes and saved by it
 up: securities, ISINs, prices and amounts. Output is deterministic apart from PP's generated UUIDs.
 
 What the tests rely on:
-  * three EUR securities with daily prices 2023-01-02 .. 2026-10-30 plus a latest quote,
+  * three EUR securities (plus one USD) with daily prices 2023-01-02 .. 2026-10-30 plus a latest quote,
     two of them with "World" in their name (the ambiguous-match test);
   * one security bought and fully sold (closed position), one retired security with no trades;
   * monthly buys with fees, quarterly dividends with withholding tax, deposits and interest;
-  * two cash accounts, two portfolios, and a "Regions" taxonomy with partial assignments.
+  * a USD account, portfolio and security, so currency conversion is exercised;
+  * four cash accounts, three portfolios, and a "Regions" taxonomy with partial assignments.
 """
 
 from __future__ import annotations
@@ -70,8 +71,8 @@ def main() -> None:
     def cents(value: float) -> int:
         return round(value * AMOUNT_FACTOR)
 
-    def money(value: float):
-        return Money.of(CURRENCY, cents(value))
+    def money(value: float, currency: str = CURRENCY):
+        return Money.of(currency, cents(value))
 
     client = Client()
     client.setBaseCurrency(CURRENCY)
@@ -80,8 +81,8 @@ def main() -> None:
     # --- securities and prices -------------------------------------------------------------
     closes: dict[str, dict[dt.date, float]] = {}
 
-    def make_security(name, isin, ticker, start_price, drift, vol, retired=False):
-        security = Security(name, CURRENCY)
+    def make_security(name, isin, ticker, start_price, drift, vol, retired=False, currency=CURRENCY):
+        security = Security(name, currency)
         security.setIsin(isin)
         security.setTickerSymbol(ticker)
         security.setRetired(retired)
@@ -103,6 +104,7 @@ def main() -> None:
     emerging = make_security("Demo Emerging World ETF", "XX0000000002", "DEMW", 30.0, 0.0002, 0.012)
     corp = make_security("Example Corp", "XX0000000003", "EXMP", 120.0, 0.0003, 0.015)
     make_security("Retired Demo Fund", "XX0000000004", "RTRD", 10.0, 0.0, 0.005, retired=True)
+    us_corp = make_security("Demo US Corp", "XX0000000005", "DUSC", 50.0, 0.0003, 0.012, currency="USD")
 
     def close_on(security, day: dt.date) -> float:
         series = closes[str(security.getIsin())]
@@ -117,7 +119,9 @@ def main() -> None:
     savings.setCurrencyCode(CURRENCY)
     pension_cash = Account("Pension cash")
     pension_cash.setCurrencyCode(CURRENCY)
-    for account in (cash, savings, pension_cash):
+    us_cash = Account("US cash")
+    us_cash.setCurrencyCode("USD")
+    for account in (cash, savings, pension_cash, us_cash):
         client.addAccount(account)
 
     broker = Portfolio("Broker")
@@ -126,18 +130,22 @@ def main() -> None:
     pension.setReferenceAccount(pension_cash)
     client.addPortfolio(broker)
     client.addPortfolio(pension)
+    us_broker = Portfolio("US broker")
+    us_broker.setReferenceAccount(us_cash)
+    client.addPortfolio(us_broker)
 
     def account_tx(account, kind, day, amount, security=None, shares=0.0, tax=0.0):
         tx = AccountTransaction()
         tx.setType(getattr(AccountTransaction.Type, kind))
         tx.setDateTime(jdatetime(day))
-        tx.setCurrencyCode(CURRENCY)
+        currency = str(account.getCurrencyCode())
+        tx.setCurrencyCode(currency)
         tx.setAmount(cents(amount))
         if security is not None:
             tx.setSecurity(security)
             tx.setShares(round(shares * SHARE_FACTOR))
         if tax:
-            tx.addUnit(Unit(Unit.Type.TAX, money(tax)))
+            tx.addUnit(Unit(Unit.Type.TAX, money(tax, currency)))
         account.addTransaction(tx)
 
     def trade(portfolio, account, kind, day, security, shares, fee):
@@ -148,9 +156,10 @@ def main() -> None:
         entry.setDate(jdatetime(day))
         entry.setSecurity(security)
         entry.setShares(round(shares * SHARE_FACTOR))
-        entry.setCurrencyCode(CURRENCY)
+        currency = str(account.getCurrencyCode())
+        entry.setCurrencyCode(currency)
         entry.setAmount(cents(total))
-        entry.getPortfolioTransaction().addUnit(Unit(Unit.Type.FEE, money(fee)))
+        entry.getPortfolioTransaction().addUnit(Unit(Unit.Type.FEE, money(fee, currency)))
         entry.insert()
         return total
 
@@ -206,6 +215,16 @@ def main() -> None:
     account_tx(pension_cash, "DEPOSIT", dt.date(2024, 1, 15), 8000.0)
     trade(pension, pension_cash, "BUY", dt.date(2024, 1, 15), world, 60, fee=5.0)
     trade(pension, pension_cash, "BUY", dt.date(2024, 1, 15), emerging, 40, fee=5.0)
+
+    # --- US broker: a second currency, so conversion to the base currency is exercised ----
+    account_tx(us_cash, "DEPOSIT", dt.date(2024, 2, 1), 5000.0)
+    trade(us_broker, us_cash, "BUY", dt.date(2024, 2, 1), us_corp, 40, fee=1.0)
+    for quarter in (dt.date(2024, 5, 15), dt.date(2024, 8, 15), dt.date(2024, 11, 15),
+                    dt.date(2025, 2, 14), dt.date(2025, 5, 15), dt.date(2025, 8, 15),
+                    dt.date(2025, 11, 14), dt.date(2026, 2, 16), dt.date(2026, 5, 15),
+                    dt.date(2026, 8, 14)):
+        gross = 40 * 0.5
+        account_tx(us_cash, "DIVIDENDS", quarter, gross * 0.85, us_corp, 40, tax=gross * 0.15)
 
     # --- taxonomy --------------------------------------------------------------------------
     regions = Taxonomy("Regions")
