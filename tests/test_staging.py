@@ -208,3 +208,26 @@ def test_promote_fails_closed_without_a_way_to_check_the_app(area, tmp_path):
     assert result.returncode != 0
     assert "cannot check whether Portfolio Performance is running" in result.stderr
     assert live.read_bytes() == before
+
+
+def test_a_change_pp_would_flag_is_not_staged(area):
+    """A portfolio BUY without its cash leg is something PP's own checks report on opening."""
+    import jpype
+
+    def orphan_buy(client):
+        portfolio = list(client.getPortfolios())[0]
+        security = next(s for s in client.getSecurities() if s.getPrices().size())
+        transaction = jpype.JClass("name.abuchen.portfolio.model.PortfolioTransaction")()
+        transaction.setType(jpype.JClass("name.abuchen.portfolio.model.PortfolioTransaction$Type").BUY)
+        transaction.setDateTime(jpype.JClass("java.time.LocalDateTime").of(2026, 11, 3, 0, 0))
+        transaction.setSecurity(security)
+        transaction.setShares(100_000_000)
+        transaction.setCurrencyCode(security.getCurrencyCode())
+        transaction.setAmount(10_000)
+        portfolio.addTransaction(transaction)
+        return {}
+
+    with pytest.raises(StagingError, match="consistency checks flag the result"):
+        staging.apply(area, "orphan", {"portfolio_tx:BUY": 1}, orphan_buy)
+    assert not area.staged.exists()
+    assert not list(area.directory.glob(".*.tmp"))

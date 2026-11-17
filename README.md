@@ -144,12 +144,19 @@ read [SAFETY.md](SAFETY.md) first.
 | --- | --- |
 | `add_prices` | adds prices to one security for dates that have none; refuses if any date already has one |
 | `record_cash` | `DEPOSIT`, `REMOVAL`, `INTEREST`, `INTEREST_CHARGE`, `FEES`, `FEES_REFUND`, `TAXES`, `TAX_REFUND` on one account, optionally linked to a `security`, with `tax` withheld for interest; refuses a likely duplicate unless `allow_duplicate` |
+| `add_security` | a new security (name, currency, optional ISIN / ticker / WKN); refuses one whose ISIN, ticker or name is already taken |
+| `record_buy` / `record_sell` | a trade in one portfolio, settled on its reference account (or `account`); `price` or `total`, plus `fees` and `taxes`; `exchange_rate` when the security trades in another currency; a sell is refused if the portfolio would hold too few shares on that date or any later one |
+| `record_dividend` | a dividend on an account (`amount` is net), with `tax`, `fees` and `exchange_rate`; `shares` defaults to the shares held on that date |
+| `record_cash_transfer` | moves cash between two accounts in the same currency |
+| `record_share_transfer` | moves shares between two portfolios |
+| `record_delivery` | shares in or out of a portfolio without cash (`direction` inbound/outbound), e.g. a transfer from another broker |
 | `get_staged_changes` | what is staged, and whether it can still be promoted |
 | `discard_staged` | moves the staged copy to `backups/` and starts over from the replica |
 
 Write tools match securities and accounts exactly (UUID, ISIN, ticker or full name), never by a
-fragment, and refuse future dates. More (trades, dividends, transfers, taxonomy assignments) will
-follow.
+fragment, refuse future dates, and refuse a likely duplicate unless `allow_duplicate`. Every
+change must also pass Portfolio Performance's own consistency checks (the ones the app runs when
+it opens a file) before it is staged. Taxonomy assignments will follow.
 
 ## Troubleshooting
 

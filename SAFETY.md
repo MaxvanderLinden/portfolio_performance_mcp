@@ -53,6 +53,10 @@ add_transaction(...) -> staged/portfolio.staged.xml
   fingerprint: transactions 120 -> 121, all other counters unchanged
 ```
 
+Before a change is staged, the saved copy is reloaded and must show exactly the declared change
+in its counters, and must not raise any consistency issue (PP's own `Checker`, run on a throwaway
+copy because some checks repair in memory) that the file did not already have.
+
 You review the diff, open the staged file in PP, and Save As if you agree. Full write capability,
 zero blast radius. Promoting a staged file to live should be a shell command **you** run, not a
 tool the model can call.
