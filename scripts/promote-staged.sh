@@ -37,7 +37,17 @@ manifest() {  # manifest <python expression over m>
 [ -f "$STAGED" ] || die "nothing staged ($STAGED does not exist)"
 [ -f "$MANIFEST" ] || die "$MANIFEST is missing; cannot tell what the staged file is based on"
 
-if pgrep -f PortfolioPerformance >/dev/null 2>&1; then
+# Is the app running? Fail closed: if we cannot tell, do not promote.
+pp_running() {
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f PortfolioPerformance >/dev/null 2>&1
+  elif command -v tasklist >/dev/null 2>&1; then  # Git Bash on Windows
+    tasklist //FI "IMAGENAME eq PortfolioPerformance.exe" 2>/dev/null | grep -qi PortfolioPerformance
+  else
+    die "cannot check whether Portfolio Performance is running (no pgrep or tasklist)"
+  fi
+}
+if pp_running; then
   die "Portfolio Performance is running. Quit it first; it rewrites the whole file on save."
 fi
 

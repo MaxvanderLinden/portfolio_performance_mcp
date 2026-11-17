@@ -27,7 +27,17 @@ Performance's own classes:
 ./.venv/bin/python tests/fixtures/make_demo.py
 ```
 
-`scripts/smoke.sh` calls the installed server over stdio, the way an MCP client does.
+`scripts/smoke.sh` calls the installed read server over stdio, the way an MCP client does, against
+your configured replica. `scripts/smoke_write.py` does the same for `pp-write`, always against a
+temporary copy of the demo portfolio:
+
+```bash
+./.venv/bin/python scripts/smoke_write.py
+```
+
+Do not smoke-test `pp-write` with `fastmcp call`: MCP clients start servers with a filtered
+environment, so `PP_FILE`/`PP_STAGED_DIR` exported in your shell do not reach the server and it
+falls back to your real `~/pp-mcp` replica.
 
 **Never commit a real portfolio file.** `.gitignore` excludes `*.xml` except the demo fixture.
 

@@ -186,3 +186,48 @@ def test_promote_needs_a_terminal(area, tmp_path):
     assert result.returncode != 0
     assert "no terminal" in result.stderr
     assert live.read_bytes() == before
+
+
+def test_promote_fails_closed_without_a_way_to_check_the_app(area, tmp_path):
+    """No pgrep and no tasklist (e.g. a bare Git Bash) must block, not count as 'not running'."""
+    staging.apply(area, "ok", {"prices": 1}, add_prices(1))
+    live = tmp_path / "live.xml"
+    shutil.copyfile(area.replica, live)
+    live.chmod(0o644)
+    before = live.read_bytes()
+    no_tools = tmp_path / "no-tools.sh"
+    no_tools.write_text("command() { return 1; }\n")  # every `command -v` lookup fails
+
+    env = {**os.environ, "PP_LIVE_FILE": str(live), "PP_STAGED_DIR": str(area.directory),
+           "BASH_ENV": str(no_tools)}
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "promote-staged.sh")],
+        env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL, start_new_session=True,
+    )
+
+    assert result.returncode != 0
+    assert "cannot check whether Portfolio Performance is running" in result.stderr
+    assert live.read_bytes() == before
+
+
+def test_a_change_pp_would_flag_is_not_staged(area):
+    """A portfolio BUY without its cash leg is something PP's own checks report on opening."""
+    import jpype
+
+    def orphan_buy(client):
+        portfolio = list(client.getPortfolios())[0]
+        security = next(s for s in client.getSecurities() if s.getPrices().size())
+        transaction = jpype.JClass("name.abuchen.portfolio.model.PortfolioTransaction")()
+        transaction.setType(jpype.JClass("name.abuchen.portfolio.model.PortfolioTransaction$Type").BUY)
+        transaction.setDateTime(jpype.JClass("java.time.LocalDateTime").of(2026, 11, 3, 0, 0))
+        transaction.setSecurity(security)
+        transaction.setShares(100_000_000)
+        transaction.setCurrencyCode(security.getCurrencyCode())
+        transaction.setAmount(10_000)
+        portfolio.addTransaction(transaction)
+        return {}
+
+    with pytest.raises(StagingError, match="consistency checks flag the result"):
+        staging.apply(area, "orphan", {"portfolio_tx:BUY": 1}, orphan_buy)
+    assert not area.staged.exists()
+    assert not list(area.directory.glob(".*.tmp"))

@@ -238,16 +238,29 @@ def _locked(area: StagingArea) -> Generator[None, None, None]:
     with _thread_lock:
         lock_path = area.directory / ".lock"
         with open(lock_path, "a+") as handle:
-            try:
+            if sys.platform == "win32":
+                import msvcrt
+
+                handle.seek(0)
+                while True:  # LK_LOCK gives up after ~10 s with OSError; keep waiting
+                    try:
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                        break
+                    except OSError:
+                        continue
+                try:
+                    yield
+                finally:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
                 import fcntl
-            except ImportError:  # Windows: in-process lock only
-                yield
-                return
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+
+                fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def _verify_staged(
@@ -284,6 +297,28 @@ def _load(path: Path) -> j.Client:
         return j.client_factory().load(stream)
     finally:
         stream.close()
+
+
+def _issues(client: j.Client) -> list[str]:
+    return sorted(str(issue.getLabel()) for issue in j.checker().runAll(client))
+
+
+def _check_consistency(reloaded: j.Client, base: Path) -> None:
+    """Run PP's own consistency checks on the reloaded result; refuse if the change introduced
+    an issue the app would flag on opening. Both clients checked here are throwaway copies."""
+    found = _issues(reloaded)
+    if not found:
+        return
+    already = _issues(_load(base))
+    new = list(found)
+    for label in already:
+        if label in new:
+            new.remove(label)
+    if new:
+        raise StagingError(
+            "Portfolio Performance's consistency checks flag the result: " + "; ".join(new[:5])
+            + ". Nothing was staged."
+        )
 
 
 # --- the write path --------------------------------------------------------------------------
@@ -327,8 +362,10 @@ def apply(
         tmp.unlink(missing_ok=True)
         try:
             j.client_factory().save(client, j.file()(str(tmp)))
-            after = census(_load(tmp))  # what is on disk, not what is in memory
+            reloaded = _load(tmp)  # what is on disk, not what is in memory
+            after = census(reloaded)
             check_delta(before, after, expected)
+            _check_consistency(reloaded, base)
             tmp.chmod(0o444)
             staged_sha = sha256(tmp)
             _replace(tmp, area.staged)
