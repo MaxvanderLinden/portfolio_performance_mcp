@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,9 +98,37 @@ def find_libjvm(config: Config, env: Mapping[str, str] | None = None) -> Path:
     )
 
 
+_BUNDLE_JAR = re.compile(r"^(?P<name>.+?)_(?P<version>\d[^_]*)\.jar$")
+
+
+def _version_key(version: str) -> tuple[tuple[int, ...], str]:
+    """OSGi order: major.minor.micro numerically, then the qualifier as a string."""
+    parts = version.split(".", 3)
+    numbers = tuple(int(p) if p.isdigit() else 0 for p in parts[:3])
+    return numbers + (0,) * (3 - len(numbers)), parts[3] if len(parts) > 3 else ""
+
+
+def newest_bundles(jars: list[str]) -> list[str]:
+    """Keep the newest version of each bundle. An app update leaves the old versions behind
+    (e.g. both name.abuchen.portfolio_0.89.0.jar and _0.90.0.jar), and with both on the
+    classpath, which class loads would depend on glob order."""
+    newest: dict[str, tuple[tuple[tuple[int, ...], str], str]] = {}
+    others: list[str] = []
+    for jar in jars:
+        match = _BUNDLE_JAR.match(os.path.basename(jar))
+        if match is None:
+            others.append(jar)
+            continue
+        key = _version_key(match["version"])
+        current = newest.get(match["name"])
+        if current is None or key > current[0]:
+            newest[match["name"]] = (key, jar)
+    return sorted(others + [jar for _, jar in newest.values()])
+
+
 def find_classpath(config: Config) -> list[str]:
-    jars = glob.glob(str(config.plugins / "*.jar"))
-    if not any("name.abuchen.portfolio_" in jar for jar in jars):
+    jars = newest_bundles(glob.glob(str(config.plugins / "*.jar")))
+    if not any(os.path.basename(jar).startswith("name.abuchen.portfolio_") for jar in jars):
         raise BridgeError(f"Portfolio Performance core jar not found in {config.plugins}.")
     return jars
 
