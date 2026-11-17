@@ -137,7 +137,18 @@ PP_LIVE_FILE="/path/to/your/portfolio.xml" ./scripts/promote-staged.sh
 It refuses if the app is running or if your file changed since the replica was taken, asks for
 confirmation at the terminal, backs up your file, and refreshes the replica. Register `pp-write`
 only while you are editing (`claude mcp add portfolio-write -- "$PWD/.venv/bin/pp-write"`), and
-read [SAFETY.md](SAFETY.md) first. The write tools themselves are still being added.
+read [SAFETY.md](SAFETY.md) first.
+
+| tool | does |
+| --- | --- |
+| `add_prices` | adds prices to one security for dates that have none; refuses if any date already has one |
+| `record_cash` | `DEPOSIT`, `REMOVAL`, `INTEREST`, `INTEREST_CHARGE`, `FEES`, `FEES_REFUND`, `TAXES`, `TAX_REFUND` on one account; refuses a likely duplicate unless `allow_duplicate` |
+| `get_staged_changes` | what is staged, and whether it can still be promoted |
+| `discard_staged` | moves the staged copy to `backups/` and starts over from the replica |
+
+Write tools match securities and accounts exactly (UUID, ISIN, ticker or full name), never by a
+fragment, and refuse future dates. More (trades, dividends, transfers, taxonomy assignments) will
+follow.
 
 ## Troubleshooting
 

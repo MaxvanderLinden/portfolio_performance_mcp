@@ -67,7 +67,7 @@ def test_read_only_server_loads_no_write_code(config):
 def test_write_server_adds_only_annotated_write_tools(config, tmp_path, monkeypatch):
     from pp_mcp.bridge import set_config_provider
     from pp_mcp.server import read_write
-    from pp_mcp.write_tools import WRITE_TOOLS
+    from pp_mcp.write_tools import STAGED_READ_TOOLS, WRITE_TOOLS
 
     monkeypatch.setenv("PP_STAGED_DIR", str(tmp_path / "staged"))
 
@@ -82,7 +82,9 @@ def test_write_server_adds_only_annotated_write_tools(config, tmp_path, monkeypa
 
     read, _ = _call("list_accounts")
     write_names = {tool.__name__ for tool in WRITE_TOOLS}
-    assert set(tools) == set(read) | write_names
+    staged_reads = {tool.__name__ for tool in STAGED_READ_TOOLS}
+    assert write_names == {"add_prices", "record_cash", "discard_staged"}
+    assert set(tools) == set(read) | write_names | staged_reads
     for name, tool in tools.items():
         assert tool.annotations is not None
         assert tool.annotations.destructive_hint is False

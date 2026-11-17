@@ -62,6 +62,8 @@ def read_write() -> FastMCP:
     area = staging.staging_area()
     set_config_provider(lambda: staging.read_config(area))
     server = _server("portfolio-performance-write", WRITE_INSTRUCTIONS)
+    for tool in write_tools.STAGED_READ_TOOLS:
+        server.tool(tool, annotations=READ_ANNOTATIONS)
     for tool in write_tools.WRITE_TOOLS:
         server.tool(tool, annotations=WRITE_ANNOTATIONS)
     return server

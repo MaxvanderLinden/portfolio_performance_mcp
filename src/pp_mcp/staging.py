@@ -319,6 +319,26 @@ def status(area: StagingArea) -> dict[str, Any]:
         }
 
 
+def discard(area: StagingArea) -> dict[str, Any]:
+    """Move the staged copy and manifest to backups/discarded-<time>/. Nothing is deleted, and
+    neither the replica nor the live file is involved."""
+    with _locked(area):
+        present = [p for p in (area.staged, area.manifest) if p.exists()]
+        if not present:
+            return {"discarded": False, "note": "nothing was staged"}
+        manifest = read_manifest(area) if area.manifest.exists() else None
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        target = area.directory / "backups" / f"discarded-{stamp}"
+        target.mkdir(parents=True)
+        for path in present:
+            _replace(path, target / path.name)
+        return {
+            "discarded": True,
+            "changes_set_aside": len(manifest["changes"]) if manifest else 0,
+            "moved_to": str(target),
+        }
+
+
 def read_config(area: StagingArea) -> Config:
     """Config for the write server's read tools: they see the staged copy once one exists, so a
     model that just added prices can read them back. A staged copy built on an outdated replica
