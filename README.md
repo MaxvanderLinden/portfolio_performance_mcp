@@ -90,6 +90,7 @@ Add an `"env": {...}` block to that entry if you need any of the settings below.
 | `JAVA_HOME` | unset | a Java 21+ runtime, used only if none is bundled with Portfolio Performance |
 | `PP_LIVE_FILE` | none (required) | your real file; read by `refresh-replica.sh` only |
 | `PP_ALLOW_WRITABLE_SOURCE` | unset | set to `1` to skip the read-only check (not recommended) |
+| `PP_STAGED_DIR` | `~/pp-mcp/staged` | where `pp-write` keeps staged changes; read by `promote-staged.sh` too |
 
 The server **refuses to start on a writable `PP_FILE`**. That catches the dangerous mistake of
 pointing it at your real file instead of the replica.
@@ -119,6 +120,24 @@ cumulative over the period. **Scopes:** `client`, `portfolio`, `account`, `secur
 
 Every tool is marked read-only. Large responses are capped and say so (`truncated`,
 `total_matching`), so narrow with date ranges rather than raising `limit`.
+
+## Staged writes (optional, in development)
+
+A second server, `pp-write`, adds tools that **add** records (prices, transactions, …). It never
+touches your real file or the replica: every change goes into a staged copy in
+`~/pp-mcp/staged/` (`PP_STAGED_DIR`), checked by reloading it with Portfolio Performance's own
+classes. Once something is staged, its read tools show the staged copy.
+
+When you are happy with the changes, quit Portfolio Performance and promote them yourself:
+
+```bash
+PP_LIVE_FILE="/path/to/your/portfolio.xml" ./scripts/promote-staged.sh
+```
+
+It refuses if the app is running or if your file changed since the replica was taken, asks for
+confirmation at the terminal, backs up your file, and refreshes the replica. Register `pp-write`
+only while you are editing (`claude mcp add portfolio-write -- "$PWD/.venv/bin/pp-write"`), and
+read [SAFETY.md](SAFETY.md) first. The write tools themselves are still being added.
 
 ## Troubleshooting
 

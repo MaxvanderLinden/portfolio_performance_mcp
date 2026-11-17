@@ -38,6 +38,11 @@ Ship it as **two servers from one package**:
 | `pp-read` | `pp_mcp.server:read_only` | always | read + analytics, write module never imported |
 | `pp-write` | `pp_mcp.server:read_write` | only when you're actively editing | adds the additive tools |
 
+Implemented: `pp-mcp`/`pp-read` and `pp-write` (`pyproject.toml`). Layer 3 lives in
+`src/pp_mcp/staging.py` and `scripts/promote-staged.sh`; the Layer 4 checks (process, compare
+against the base hash, atomic replace, declared-delta guard) are applied at promote time and on
+every staged write respectively.
+
 ## Layer 3 — staging, not live writes
 
 Write tools produce a **proposed file plus a domain-level diff**, never touching the original:

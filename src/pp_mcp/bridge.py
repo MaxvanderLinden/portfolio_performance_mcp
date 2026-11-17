@@ -12,7 +12,7 @@ import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import jpype
@@ -32,6 +32,7 @@ class BridgeError(Exception):
 _lock = threading.RLock()
 _started = False
 _cache: "ClientHandle | None" = None
+_config_provider: "Callable[[], Config] | None" = None
 
 
 @dataclass(frozen=True)
@@ -176,10 +177,17 @@ def currency_converter(client: Any, currency: str | None = None) -> Any:
     return impl(factory, currency or str(client.getBaseCurrency()))
 
 
+def set_config_provider(provider: "Callable[[], Config] | None") -> None:
+    """Let the write server point the read tools at the staged copy. None restores the replica."""
+    global _config_provider
+    with _lock:
+        _config_provider = provider
+
+
 def get_client(config: Config | None = None, force_reload: bool = False) -> ClientHandle:
-    """Return the loaded portfolio, reloading only when the replica has changed on disk."""
+    """Return the loaded portfolio, reloading only when the source has changed on disk."""
     global _cache
-    config = config or load_config()
+    config = config or (_config_provider or load_config)()
     start_jvm(config)
     ensure_thread_attached()
 

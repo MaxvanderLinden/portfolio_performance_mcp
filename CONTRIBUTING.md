@@ -27,8 +27,13 @@ Performance's own classes:
 
 ## Design notes
 
-- **No write tools in this server.** `tests/test_server.py` fails if a write module appears. Read
-  [SAFETY.md](SAFETY.md) before proposing write support.
+- **Writes live in a separate server.** `pp-mcp` never imports `write_tools` or `staging`;
+  `pp-write` (`server.read_write()`) does. `tests/test_server.py` fails if building the read server
+  loads either. Read [SAFETY.md](SAFETY.md) before adding a write tool.
+- **Every write goes through `staging.apply()`** with the counters it adds to, e.g.
+  `{"account_tx:DEPOSIT": 1}`. It saves to a temp file, reloads it, and refuses unless exactly those
+  counters grew; then it replaces the staged copy and logs the change in `manifest.json`. Add only;
+  identify things exactly (UUID, ISIN, exact name), never by fragment.
 - **The JVM starts on the main thread**, in `read_only()`. FastMCP runs sync tools in worker
   threads and starting the JVM from one of those hangs; `get_client()` attaches each worker.
   The JVM cannot be restarted in-process; `reset_for_tests()` only drops the cache.

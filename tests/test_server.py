@@ -37,13 +37,53 @@ def test_tool_call_returns_live_numbers(handle):
     assert data["count"] > 0
 
 
-def test_no_write_module_is_importable():
-    """SAFETY.md layer 2: the read server cannot reach write code, because none exists yet."""
-    import importlib
+WRITE_MODULES = ("pp_mcp.write_tools", "pp_mcp.staging")
 
-    for module in ("pp_mcp.write_tools", "pp_mcp.safety"):
-        try:
-            importlib.import_module(module)
-        except ImportError:
-            continue
-        raise AssertionError(f"{module} exists; the read-only server must not be able to import it")
+
+def _modules_after(code: str) -> set[str]:
+    """Run `code` in a fresh interpreter and report which write modules it loaded."""
+    import json
+    import subprocess
+    import sys
+
+    probe = f"""
+import json, sys
+{code}
+print(json.dumps([m for m in {WRITE_MODULES!r} if m in sys.modules]))
+"""
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+    return set(json.loads(result.stdout.strip().splitlines()[-1]))
+
+
+def test_importing_the_server_loads_no_write_code():
+    """SAFETY.md layer 2: the write modules are imported inside read_write() only."""
+    assert _modules_after("import pp_mcp, pp_mcp.server, pp_mcp.__main__") == set()
+
+
+def test_read_only_server_loads_no_write_code(config):
+    assert _modules_after("from pp_mcp.server import read_only; read_only()") == set()
+
+
+def test_write_server_adds_only_annotated_write_tools(config, tmp_path, monkeypatch):
+    from pp_mcp.bridge import set_config_provider
+    from pp_mcp.server import read_write
+    from pp_mcp.write_tools import WRITE_TOOLS
+
+    monkeypatch.setenv("PP_STAGED_DIR", str(tmp_path / "staged"))
+
+    async def go():
+        async with Client(read_write()) as client:
+            return {tool.name: tool for tool in await client.list_tools()}
+
+    try:
+        tools = asyncio.run(go())
+    finally:
+        set_config_provider(None)
+
+    read, _ = _call("list_accounts")
+    write_names = {tool.__name__ for tool in WRITE_TOOLS}
+    assert set(tools) == set(read) | write_names
+    for name, tool in tools.items():
+        assert tool.annotations is not None
+        assert tool.annotations.destructive_hint is False
+        assert tool.annotations.read_only_hint is (name not in write_names)
