@@ -148,6 +148,10 @@ class CurrencyConverterImplClass(Protocol):
     def __call__(self, factory: ExchangeRateProviderFactory, currency: str) -> CurrencyConverter: ...
 
 
+class MoneyClass(Protocol):
+    def of(self, currency: JString, amount: int) -> Money: ...
+
+
 class ValuesKind(Protocol):
     def factor(self) -> int: ...
 
@@ -204,6 +208,16 @@ class Unit(Protocol):
     def getAmount(self) -> Money | None: ...
 
 
+class TransactionOwner(Identified, Protocol):
+    """An Account or a Portfolio."""
+
+
+class CrossEntry(Protocol):
+    """Links the two legs of a trade (BuySellEntry) or a transfer."""
+
+    def getCrossOwner(self, transaction: Transaction) -> TransactionOwner: ...
+
+
 class Transaction(Protocol):
     """What AccountTransaction and PortfolioTransaction have in common."""
 
@@ -217,15 +231,22 @@ class Transaction(Protocol):
     def getShares(self) -> int: ...
     def getUnits(self) -> JStream[Unit]: ...
     def getNote(self) -> JString | None: ...
+    def getCrossEntry(self) -> CrossEntry | None: ...
 
 
 class AccountTransaction(Transaction, Protocol):
     def setType(self, kind: JEnum) -> None: ...
+    def setSecurity(self, security: Security) -> None: ...
+    def addUnit(self, unit: Unit) -> None: ...
     def setDateTime(self, when: LocalDateTime) -> None: ...
     def setCurrencyCode(self, currency: JString) -> None: ...
     def setAmount(self, amount: int) -> None: ...
     def setNote(self, note: str) -> None: ...
     def setUpdatedAt(self, when: Instant) -> None: ...
+
+
+class UnitClass(Protocol):
+    def __call__(self, kind: JEnum, amount: Money) -> Unit: ...
 
 
 class AccountTransactionClass(Protocol):
@@ -501,6 +522,18 @@ def exchange_rate_provider_factory() -> ExchangeRateProviderFactoryClass:
 
 def currency_converter_impl() -> CurrencyConverterImplClass:
     return cast(CurrencyConverterImplClass, jpype.JClass(_MONEY + "CurrencyConverterImpl"))
+
+
+def money() -> MoneyClass:
+    return cast(MoneyClass, jpype.JClass(_MONEY + "Money"))
+
+
+def unit() -> UnitClass:
+    return cast(UnitClass, jpype.JClass(_MODEL + "Transaction$Unit"))
+
+
+def unit_type() -> EnumClass:
+    return cast(EnumClass, jpype.JClass(_MODEL + "Transaction$Unit$Type"))
 
 
 def client_factory() -> ClientFactoryClass:

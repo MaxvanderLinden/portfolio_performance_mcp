@@ -102,7 +102,7 @@ pointing it at your real file instead of the replica.
 | `list_securities` | securities with latest price, `include_retired` optional |
 | `list_accounts` / `list_portfolios` | current cash balances / market values |
 | `get_holdings` | every position and account with share of total, optionally on a past date |
-| `get_transactions` | filtered by security, account, portfolio, type, date range |
+| `get_transactions` | filtered by security, account, portfolio, type, date range; a buy or sell is one row with both its portfolio and cash account |
 | `get_prices` | history plus the latest quote, with a summary of the full range |
 | `list_taxonomies` / `get_allocation` | classification schemes and the breakdown by one |
 | `get_performance` | TTWROR, annualized, IRR, max drawdown, volatility for a period and scope |
@@ -134,15 +134,16 @@ When you are happy with the changes, quit Portfolio Performance and promote them
 PP_LIVE_FILE="/path/to/your/portfolio.xml" ./scripts/promote-staged.sh
 ```
 
-It refuses if the app is running or if your file changed since the replica was taken, asks for
-confirmation at the terminal, backs up your file, and refreshes the replica. Register `pp-write`
+It refuses if the app is running (or if it cannot tell) or if your file changed since the
+replica was taken, asks for confirmation at the terminal, backs up your file, and refreshes the
+replica. On Windows, run it from Git Bash or WSL; that path is untested so far. Register `pp-write`
 only while you are editing (`claude mcp add portfolio-write -- "$PWD/.venv/bin/pp-write"`), and
 read [SAFETY.md](SAFETY.md) first.
 
 | tool | does |
 | --- | --- |
 | `add_prices` | adds prices to one security for dates that have none; refuses if any date already has one |
-| `record_cash` | `DEPOSIT`, `REMOVAL`, `INTEREST`, `INTEREST_CHARGE`, `FEES`, `FEES_REFUND`, `TAXES`, `TAX_REFUND` on one account; refuses a likely duplicate unless `allow_duplicate` |
+| `record_cash` | `DEPOSIT`, `REMOVAL`, `INTEREST`, `INTEREST_CHARGE`, `FEES`, `FEES_REFUND`, `TAXES`, `TAX_REFUND` on one account, optionally linked to a `security`, with `tax` withheld for interest; refuses a likely duplicate unless `allow_duplicate` |
 | `get_staged_changes` | what is staged, and whether it can still be promoted |
 | `discard_staged` | moves the staged copy to `backups/` and starts over from the replica |
 

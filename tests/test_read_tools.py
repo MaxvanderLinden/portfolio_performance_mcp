@@ -110,3 +110,31 @@ def test_allocation_reconciles_with_total_assets():
 def test_allocation_needs_an_unambiguous_taxonomy():
     with pytest.raises(ToolError, match="no unique taxonomy"):
         rt.get_allocation("does not exist")
+
+
+def test_a_trade_is_one_row_with_both_sides(handle):
+    """PP stores a buy as a portfolio leg and a cash leg; it must be listed once, not twice."""
+    portfolio_buys = sum(
+        1
+        for p in handle.client.getPortfolios()
+        for t in p.getTransactions()
+        if str(t.getType().name()) == "BUY"
+    )
+    buys = rt.get_transactions(type="BUY", limit=1000)
+    assert buys["total_matching"] == portfolio_buys
+    rows = buys["transactions"]
+    assert all(t["account"] and t["portfolio"] and t["shares"] for t in rows)
+    assert len({t["uuid"] for t in rows}) == len(rows)
+
+
+def test_account_filter_includes_trades_settled_on_it():
+    by_account = rt.get_transactions(account="Broker cash", type="BUY", limit=1000)
+    assert by_account["total_matching"] > 0
+    assert {t["account"] for t in by_account["transactions"]} == {"Broker cash"}
+
+    both = rt.get_transactions(account="Broker cash", portfolio="Broker", type="BUY", limit=1000)
+    assert both["total_matching"] > 0
+    assert {(t["account"], t["portfolio"]) for t in both["transactions"]} == {("Broker cash", "Broker")}
+
+    unrelated = rt.get_transactions(account="Savings", type="BUY", limit=1000)
+    assert unrelated["total_matching"] == 0

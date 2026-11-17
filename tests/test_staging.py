@@ -186,3 +186,25 @@ def test_promote_needs_a_terminal(area, tmp_path):
     assert result.returncode != 0
     assert "no terminal" in result.stderr
     assert live.read_bytes() == before
+
+
+def test_promote_fails_closed_without_a_way_to_check_the_app(area, tmp_path):
+    """No pgrep and no tasklist (e.g. a bare Git Bash) must block, not count as 'not running'."""
+    staging.apply(area, "ok", {"prices": 1}, add_prices(1))
+    live = tmp_path / "live.xml"
+    shutil.copyfile(area.replica, live)
+    live.chmod(0o644)
+    before = live.read_bytes()
+    no_tools = tmp_path / "no-tools.sh"
+    no_tools.write_text("command() { return 1; }\n")  # every `command -v` lookup fails
+
+    env = {**os.environ, "PP_LIVE_FILE": str(live), "PP_STAGED_DIR": str(area.directory),
+           "BASH_ENV": str(no_tools)}
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "promote-staged.sh")],
+        env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL, start_new_session=True,
+    )
+
+    assert result.returncode != 0
+    assert "cannot check whether Portfolio Performance is running" in result.stderr
+    assert live.read_bytes() == before

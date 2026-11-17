@@ -238,16 +238,29 @@ def _locked(area: StagingArea) -> Generator[None, None, None]:
     with _thread_lock:
         lock_path = area.directory / ".lock"
         with open(lock_path, "a+") as handle:
-            try:
+            if sys.platform == "win32":
+                import msvcrt
+
+                handle.seek(0)
+                while True:  # LK_LOCK gives up after ~10 s with OSError; keep waiting
+                    try:
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                        break
+                    except OSError:
+                        continue
+                try:
+                    yield
+                finally:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
                 import fcntl
-            except ImportError:  # Windows: in-process lock only
-                yield
-                return
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+
+                fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def _verify_staged(

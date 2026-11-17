@@ -125,6 +125,34 @@ def test_record_cash_rejects_bad_input(area, account, kind, amount, message):
     assert staging.status(area)["staged"] is False
 
 
+def test_interest_with_tax_withheld(area):
+    result = write_tools.record_cash("Savings", "INTEREST", "7.50", "2026-11-03", tax="2.50")
+
+    transaction = result["change"]["details"]["transaction"]
+    assert transaction["amount"] == {"amount": 7.5, "currency": "EUR"}
+    assert transaction["taxes"] == {"amount": 2.5, "currency": "EUR"}
+    assert transaction["gross"] == {"amount": 10.0, "currency": "EUR"}
+
+
+def test_fee_linked_to_a_security(area):
+    result = write_tools.record_cash("Broker cash", "FEES", 3, "2026-11-03", security="XX0000000001")
+    transaction = result["change"]["details"]["transaction"]
+    assert transaction["security"] == "Demo Global World ETF"
+    assert transaction["security_isin"] == "XX0000000001"
+
+
+@pytest.mark.parametrize("kind, extra, message", [
+    ("DEPOSIT", {"security": "DWLD"}, "cannot be linked to a security"),
+    ("FEES", {"tax": 1}, "only be given for INTEREST"),
+    ("INTEREST", {"tax": 0}, "greater than zero"),
+    ("FEES", {"security": "World"}, "no security is exactly"),
+])
+def test_record_cash_rejects_bad_links(area, kind, extra, message):
+    with pytest.raises(ToolError, match=message):
+        write_tools.record_cash("Broker cash", kind, 1, "2026-11-03", **extra)
+    assert staging.status(area)["staged"] is False
+
+
 # --- staging housekeeping --------------------------------------------------------------------
 
 

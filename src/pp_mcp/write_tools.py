@@ -40,6 +40,8 @@ CASH_TYPES = (
     "DEPOSIT", "REMOVAL", "INTEREST", "INTEREST_CHARGE",
     "FEES", "FEES_REFUND", "TAXES", "TAX_REFUND",
 )
+# Types Portfolio Performance lets you attach to a security (e.g. a custody fee for one fund).
+SECURITY_CASH_TYPES = frozenset(CASH_TYPES) - {"DEPOSIT", "REMOVAL"}
 
 
 # --- helpers ---------------------------------------------------------------------------------
@@ -191,6 +193,8 @@ def record_cash(
     date: str,
     note: str | None = None,
     allow_duplicate: bool = False,
+    security: str | None = None,
+    tax: float | str | None = None,
 ) -> staging.ApplyResult:
     """Record a cash transaction on one account, in the account's currency.
 
@@ -200,10 +204,14 @@ def record_cash(
     Args:
         account: account UUID or full name, matched exactly.
         type: DEPOSIT, REMOVAL, INTEREST, INTEREST_CHARGE, FEES, FEES_REFUND, TAXES or TAX_REFUND.
-        amount: positive amount; the type gives the direction (REMOVAL takes money out).
+        amount: positive amount booked on the account; the type gives the direction (REMOVAL
+            takes money out). For INTEREST with tax withheld, this is the net amount received.
         date: ISO date, not in the future.
         note: optional note to store with the transaction, as the user worded it.
         allow_duplicate: record it even if an identical transaction exists.
+        security: optional security this relates to (UUID, ISIN, ticker or full name, exactly),
+            e.g. a custody fee for one fund. Not for DEPOSIT or REMOVAL.
+        tax: INTEREST only: tax withheld, so the gross interest is amount + tax.
     """
     kind = str(type).strip().upper()
     if kind not in CASH_TYPES:
@@ -211,9 +219,15 @@ def record_cash(
     when = _past_date(date, "date")
     cents = _fixed_point(amount, AMOUNT_FACTOR, "amount", 2)
     text = (note or "").strip() or None
+    if security is not None and kind not in SECURITY_CASH_TYPES:
+        raise ToolError(f"a {kind} cannot be linked to a security")
+    if tax is not None and kind != "INTEREST":
+        raise ToolError("tax can only be given for INTEREST (as tax withheld)")
+    tax_cents = _fixed_point(tax, AMOUNT_FACTOR, "tax", 2) if tax is not None else None
 
     def mutate(client: j.Client) -> JsonObject:
         target = _exact_account(client, account)
+        linked = _exact_security(client, security) if security is not None else None
         if not allow_duplicate:
             for existing in target.getTransactions():
                 if (
@@ -232,6 +246,11 @@ def record_cash(
         transaction.setDateTime(j.local_date_time().of(when.year, when.month, when.day, 0, 0))
         transaction.setCurrencyCode(target.getCurrencyCode())
         transaction.setAmount(cents)
+        if linked is not None:
+            transaction.setSecurity(linked)
+        if tax_cents is not None:
+            withheld = j.money().of(target.getCurrencyCode(), tax_cents)
+            transaction.addUnit(j.unit()(j.unit_type().valueOf("TAX"), withheld))
         if text:
             transaction.setNote(text)
         transaction.setUpdatedAt(j.instant().now())
