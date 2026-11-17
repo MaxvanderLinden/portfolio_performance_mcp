@@ -157,6 +157,10 @@ def same(a: j.Identified | None, b: j.Identified | None) -> bool:
     return a is not None and b is not None and str(a.getUUID()) == str(b.getUUID())
 
 
+def same_id(a: j.Classification, b: j.Classification) -> bool:
+    return str(a.getId()) == str(b.getId())
+
+
 # --- Java values -----------------------------------------------------------------------------
 
 

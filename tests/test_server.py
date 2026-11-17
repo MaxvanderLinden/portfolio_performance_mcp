@@ -37,7 +37,8 @@ def test_tool_call_returns_live_numbers(handle):
     assert data["count"] > 0
 
 
-WRITE_MODULES = ("pp_mcp.write_tools", "pp_mcp.staging", "pp_mcp.write_common", "pp_mcp.trade_tools")
+WRITE_MODULES = ("pp_mcp.write_tools", "pp_mcp.staging", "pp_mcp.write_common", "pp_mcp.trade_tools",
+                 "pp_mcp.classification_tools")
 
 
 def _modules_after(code: str) -> set[str]:
@@ -86,6 +87,7 @@ def test_write_server_adds_only_annotated_write_tools(config, tmp_path, monkeypa
     assert write_names == {
         "add_prices", "record_cash", "discard_staged", "add_security", "record_buy", "record_sell",
         "record_dividend", "record_cash_transfer", "record_share_transfer", "record_delivery",
+        "add_classification", "assign_classification",
     }
     assert set(tools) == set(read) | write_names | staged_reads
     for name, tool in tools.items():

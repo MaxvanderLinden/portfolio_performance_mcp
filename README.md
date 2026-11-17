@@ -150,13 +150,15 @@ read [SAFETY.md](SAFETY.md) first.
 | `record_cash_transfer` | moves cash between two accounts in the same currency |
 | `record_share_transfer` | moves shares between two portfolios |
 | `record_delivery` | shares in or out of a portfolio without cash (`direction` inbound/outbound), e.g. a transfer from another broker |
+| `add_classification` | a new category in a taxonomy, at the top level or under a `parent` (id, name or path such as `Developed markets » Europe`); refuses a name its parent already has |
+| `assign_classification` | puts a `security` or `account` into a category with a `weight` in percent; refuses one already in that category or weights above 100% in the taxonomy |
 | `get_staged_changes` | what is staged, and whether it can still be promoted |
 | `discard_staged` | moves the staged copy to `backups/` and starts over from the replica |
 
 Write tools match securities and accounts exactly (UUID, ISIN, ticker or full name), never by a
 fragment, refuse future dates, and refuse a likely duplicate unless `allow_duplicate`. Every
 change must also pass Portfolio Performance's own consistency checks (the ones the app runs when
-it opens a file) before it is staged. Taxonomy assignments will follow.
+it opens a file) before it is staged. Existing records, weights included, are never changed.
 
 ## Troubleshooting
 

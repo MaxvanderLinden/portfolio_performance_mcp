@@ -20,7 +20,7 @@ from typing import cast
 from fastmcp.exceptions import ToolError
 from typing_extensions import TypedDict
 
-from . import convert, staging, trade_tools
+from . import classification_tools, convert, staging, trade_tools
 from . import jtypes as j
 from . import write_common as w
 from .bridge import AMOUNT_FACTOR, QUOTE_FACTOR
@@ -202,5 +202,8 @@ def get_staged_changes() -> staging.Status:
     return staging.status(w.area())
 
 
-WRITE_TOOLS: list[Callable[..., object]] = [add_prices, record_cash, *trade_tools.TRADE_TOOLS, discard_staged]
+WRITE_TOOLS: list[Callable[..., object]] = [
+    add_prices, record_cash, *trade_tools.TRADE_TOOLS,
+    *classification_tools.CLASSIFICATION_TOOLS, discard_staged,
+]
 STAGED_READ_TOOLS: list[Callable[..., object]] = [get_staged_changes]
