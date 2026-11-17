@@ -25,16 +25,18 @@ import os
 import sys
 import threading
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import cast
 
-import jpype
+from typing_extensions import NotRequired, TypedDict
 
+from . import jtypes as j
 from .bridge import ensure_thread_attached, start_jvm
 from .config import Config, ConfigError, load_config
+from .jsontypes import JsonObject, JsonValue
 
 DEFAULT_STAGED_DIR = Path.home() / "pp-mcp" / "staged"
 STAGED_NAME = "portfolio.staged.xml"
@@ -44,6 +46,50 @@ MANIFEST_VERSION = 1
 
 class StagingError(Exception):
     """A staged write was refused; the staged copy is unchanged."""
+
+
+# TypedDict from typing_extensions: pydantic (via FastMCP) requires it before Python 3.12.
+
+
+class Change(TypedDict):
+    at: str
+    description: str
+    delta: dict[str, int]
+    details: JsonObject
+
+
+class Manifest(TypedDict):
+    version: int
+    replica: str
+    base_sha256: str
+    base_census: dict[str, int]
+    created: str
+    staged_sha256: str
+    changes: list[Change]
+
+
+class ApplyResult(TypedDict):
+    staged_file: str
+    change: Change
+    pending_changes: int
+    note: str
+
+
+class Status(TypedDict):
+    staged: bool
+    pending_changes: int
+    changes: list[Change]
+    staged_file: NotRequired[str]
+    created: NotRequired[str]
+    up_to_date_with_replica: NotRequired[bool]
+    unmodified: NotRequired[bool]
+
+
+class DiscardResult(TypedDict):
+    discarded: bool
+    note: NotRequired[str]
+    changes_set_aside: NotRequired[int]
+    moved_to: NotRequired[str]
 
 
 @dataclass(frozen=True)
@@ -61,7 +107,8 @@ class StagingArea:
         return self.directory / MANIFEST_NAME
 
     @property
-    def _tmp(self) -> Path:
+    def tmp(self) -> Path:
+        """Where a write is saved and verified before it replaces the staged copy."""
         return self.directory / f".{STAGED_NAME}.tmp"
 
 
@@ -86,7 +133,7 @@ def staging_area(config: Config | None = None, env: Mapping[str, str] | None = N
 # --- counting --------------------------------------------------------------------------------
 
 
-def census(client: Any) -> dict[str, int]:
+def census(client: j.Client) -> dict[str, int]:
     """Counters for everything a write could add. Transactions are counted per type and side,
     so a tool that meant to add a DEPOSIT cannot quietly add a BUY as well."""
     counts: Counter[str] = Counter()
@@ -151,29 +198,42 @@ def _replace(source: Path, target: Path) -> None:
     os.replace(source, target)
 
 
-def _write_json(path: Path, payload: Any) -> None:
+def _write_json(path: Path, payload: object) -> None:
     tmp = path.with_name(f".{path.name}.tmp")
     tmp.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
     _replace(tmp, path)
 
 
-def read_manifest(area: StagingArea) -> dict[str, Any] | None:
+def read_manifest(area: StagingArea) -> Manifest | None:
     if not area.manifest.exists():
         return None
     try:
-        manifest = json.loads(area.manifest.read_text(encoding="utf-8"))
+        raw: object = json.loads(area.manifest.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise StagingError(f"cannot read {area.manifest}: {exc}") from exc
-    if manifest.get("version") != MANIFEST_VERSION:
-        raise StagingError(f"{area.manifest} has an unknown format version {manifest.get('version')!r}")
-    return manifest
+    return _parse_manifest(raw, area.manifest)
+
+
+def _parse_manifest(raw: object, path: Path) -> Manifest:
+    """Check the shape of a manifest read back from disk before trusting its fields."""
+    if not isinstance(raw, dict):
+        raise StagingError(f"{path} is not a manifest")
+    data = cast("dict[str, object]", raw)
+    if data.get("version") != MANIFEST_VERSION:
+        raise StagingError(f"{path} has an unknown format version {data.get('version')!r}")
+    for field in ("replica", "base_sha256", "created", "staged_sha256"):
+        if not isinstance(data.get(field), str):
+            raise StagingError(f"{path} is missing {field!r}")
+    if not isinstance(data.get("base_census"), dict) or not isinstance(data.get("changes"), list):
+        raise StagingError(f"{path} is missing its census or change list")
+    return cast(Manifest, data)
 
 
 _thread_lock = threading.RLock()
 
 
 @contextmanager
-def _locked(area: StagingArea) -> Iterator[None]:
+def _locked(area: StagingArea) -> Generator[None, None, None]:
     """One writer at a time, also across processes (two clients may each run a pp-write)."""
     with _thread_lock:
         lock_path = area.directory / ".lock"
@@ -192,7 +252,7 @@ def _locked(area: StagingArea) -> Iterator[None]:
 
 def _verify_staged(
     area: StagingArea,
-    manifest: dict[str, Any] | None,
+    manifest: Manifest | None,
     replica_sha: str,
     hasher: Callable[[Path], str] = sha256,
 ) -> None:
@@ -218,11 +278,10 @@ def _verify_staged(
         )
 
 
-def _load(path: Path) -> Any:
-    ClientFactory = jpype.JClass("name.abuchen.portfolio.model.ClientFactory")
-    stream = jpype.JClass("java.io.FileInputStream")(str(path))
+def _load(path: Path) -> j.Client:
+    stream = j.file_input_stream()(str(path))
     try:
-        return ClientFactory.load(stream)
+        return j.client_factory().load(stream)
     finally:
         stream.close()
 
@@ -230,7 +289,7 @@ def _load(path: Path) -> Any:
 # --- the write path --------------------------------------------------------------------------
 
 
-Mutation = Callable[[Any], Mapping[str, Any]]
+Mutation = Callable[[j.Client], Mapping[str, JsonValue]]
 
 
 def apply(
@@ -238,7 +297,7 @@ def apply(
     description: str,
     expected: Mapping[str, int],
     mutate: Mutation,
-) -> dict[str, Any]:
+) -> ApplyResult:
     """Run `mutate(client)` against the staged copy, verify it, and stage the result.
 
     `expected` maps census counters to how much they must grow, e.g. `{"prices": 3}`. Every
@@ -264,11 +323,10 @@ def apply(
         before = census(client)
         details = dict(mutate(client))
 
-        tmp = area._tmp
+        tmp = area.tmp
         tmp.unlink(missing_ok=True)
         try:
-            ClientFactory = jpype.JClass("name.abuchen.portfolio.model.ClientFactory")
-            ClientFactory.save(client, jpype.JClass("java.io.File")(str(tmp)))
+            j.client_factory().save(client, j.file()(str(tmp)))
             after = census(_load(tmp))  # what is on disk, not what is in memory
             check_delta(before, after, expected)
             tmp.chmod(0o444)
@@ -280,15 +338,16 @@ def apply(
 
         now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
         if manifest is None:
-            manifest = {
-                "version": MANIFEST_VERSION,
-                "replica": str(area.replica),
-                "base_sha256": replica_sha,
-                "base_census": before,
-                "created": now,
-                "changes": [],
-            }
-        change = {"at": now, "description": description, "delta": diff(before, after), "details": details}
+            manifest = Manifest(
+                version=MANIFEST_VERSION,
+                replica=str(area.replica),
+                base_sha256=replica_sha,
+                base_census=before,
+                created=now,
+                staged_sha256=staged_sha,
+                changes=[],
+            )
+        change = Change(at=now, description=description, delta=diff(before, after), details=details)
         manifest["changes"].append(change)
         manifest["staged_sha256"] = staged_sha
         _write_json(area.manifest, manifest)
@@ -301,7 +360,7 @@ def apply(
         }
 
 
-def status(area: StagingArea) -> dict[str, Any]:
+def status(area: StagingArea) -> Status:
     """What is staged, relative to the replica it was built on. Reads only the manifest."""
     with _locked(area):
         manifest = read_manifest(area)
@@ -316,6 +375,26 @@ def status(area: StagingArea) -> dict[str, Any]:
             "unmodified": sha256(area.staged) == manifest["staged_sha256"],
             "pending_changes": len(manifest["changes"]),
             "changes": manifest["changes"],
+        }
+
+
+def discard(area: StagingArea) -> DiscardResult:
+    """Move the staged copy and manifest to backups/discarded-<time>/. Nothing is deleted, and
+    neither the replica nor the live file is involved."""
+    with _locked(area):
+        present = [p for p in (area.staged, area.manifest) if p.exists()]
+        if not present:
+            return {"discarded": False, "note": "nothing was staged"}
+        manifest = read_manifest(area) if area.manifest.exists() else None
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        target = area.directory / "backups" / f"discarded-{stamp}"
+        target.mkdir(parents=True)
+        for path in present:
+            _replace(path, target / path.name)
+        return {
+            "discarded": True,
+            "changes_set_aside": len(manifest["changes"]) if manifest else 0,
+            "moved_to": str(target),
         }
 
 

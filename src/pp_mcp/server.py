@@ -7,6 +7,8 @@ only, and `tests/test_server.py` checks that building the read server leaves the
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
@@ -62,12 +64,14 @@ def read_write() -> FastMCP:
     area = staging.staging_area()
     set_config_provider(lambda: staging.read_config(area))
     server = _server("portfolio-performance-write", WRITE_INSTRUCTIONS)
+    for tool in write_tools.STAGED_READ_TOOLS:
+        server.tool(tool, annotations=READ_ANNOTATIONS)
     for tool in write_tools.WRITE_TOOLS:
         server.tool(tool, annotations=WRITE_ANNOTATIONS)
     return server
 
 
-def _run(build) -> None:
+def _run(build: Callable[[], FastMCP]) -> None:
     try:
         server = build()
         get_client()  # load the source now, so a broken setup fails before we speak MCP

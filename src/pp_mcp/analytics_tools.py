@@ -8,15 +8,17 @@ the application shows for the same reporting period.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
 
-import jpype
 from fastmcp.exceptions import ToolError
 
 from . import convert
-from .bridge import get_client
-from .read_tools import _parse_date, _resolve_named, _resolve_security
+from . import jtypes as j
+from .bridge import ClientHandle, get_client
+from .jsontypes import JsonObject
+from .read_tools import parse_date, resolve_named, resolve_security
 
 MAX_SERIES_POINTS = 400
 
@@ -33,16 +35,15 @@ PERIOD_HELP = (
 )
 
 
-def _earliest_transaction(client: Any) -> dt.date:
-    dates = [
-        convert.datetime_of(t.getDateTime()).date()
-        for holder in list(client.getAccounts()) + list(client.getPortfolios())
-        for t in holder.getTransactions()
-    ]
+def _earliest_transaction(client: j.Client) -> dt.date:
+    holders: list[Iterable[j.Transaction]] = []
+    holders.extend(account.getTransactions() for account in client.getAccounts())
+    holders.extend(portfolio.getTransactions() for portfolio in client.getPortfolios())
+    dates = [convert.datetime_of(t.getDateTime()).date() for holder in holders for t in holder]
     return min(dates) if dates else dt.date.today()
 
 
-def _to_code(client: Any, period: str) -> str:
+def _to_code(client: j.Client, period: str) -> str:
     text = period.strip().upper()
     if text in PERIOD_ALIASES:
         return PERIOD_ALIASES[text]
@@ -52,23 +53,21 @@ def _to_code(client: Any, period: str) -> str:
         return f"Y{text}"
     if ".." in text:
         start, _, end = text.partition("..")
-        _parse_date(start, "period start")
-        _parse_date(end, "period end")
+        parse_date(start, "period start")
+        parse_date(end, "period end")
         return f"F{start}_{end}"
     return period.strip()
 
 
-def _interval(handle, period: str) -> tuple[Any, str]:
+def _interval(handle: ClientHandle, period: str) -> tuple[j.Interval, str]:
     code = _to_code(handle.client, period)
-    reporting_period = jpype.JClass("name.abuchen.portfolio.snapshot.ReportingPeriod")
-    local_date = jpype.JClass("java.time.LocalDate")
     try:
-        return reporting_period.from_(code).toInterval(local_date.now()), code
+        return j.reporting_period().from_(code).toInterval(j.local_date().now()), code
     except Exception as exc:  # noqa: BLE001 - Java throws IOException for an unparsable code
         raise ToolError(f"could not read period {period!r} (as code {code!r}). {PERIOD_HELP}") from exc
 
 
-def _interval_dates(interval: Any) -> dict[str, str]:
+def _interval_dates(interval: j.Interval) -> dict[str, str]:
     return {
         "start": str(convert.date(interval.getStart())),
         "end": str(convert.date(interval.getEnd())),
@@ -81,30 +80,32 @@ def _percent(value: float) -> float | None:
     return None if value != value else round(value, 6)
 
 
-def _index(handle, interval: Any, scope: str, name: str | None) -> tuple[Any, list[str], str]:
-    performance_index = jpype.JClass("name.abuchen.portfolio.snapshot.PerformanceIndex")
-    warnings = jpype.JClass("java.util.ArrayList")()
+def _index(
+    handle: ClientHandle, interval: j.Interval, scope: str, name: str | None
+) -> tuple[j.PerformanceIndex, list[str], str]:
+    performance_index = j.performance_index()
+    warnings = j.array_list()()
     client, converter = handle.client, handle.converter
     scope = scope.strip().lower()
 
     if scope == "client":
         index, label = performance_index.forClient(client, converter, interval, warnings), "whole portfolio"
     elif scope == "portfolio":
-        target = _resolve_named(list(client.getPortfolios()), _require(name, scope), "portfolio")
-        index = performance_index.forPortfolio(client, converter, target, interval, warnings)
-        label = str(target.getName())
+        portfolio = resolve_named(list(client.getPortfolios()), _require(name, scope), "portfolio")
+        index = performance_index.forPortfolio(client, converter, portfolio, interval, warnings)
+        label = str(portfolio.getName())
     elif scope == "account":
-        target = _resolve_named(list(client.getAccounts()), _require(name, scope), "account")
-        index = performance_index.forAccount(client, converter, target, interval, warnings)
-        label = str(target.getName())
+        account = resolve_named(list(client.getAccounts()), _require(name, scope), "account")
+        index = performance_index.forAccount(client, converter, account, interval, warnings)
+        label = str(account.getName())
     elif scope == "security":
-        target = _resolve_security(handle, _require(name, scope))
-        index = performance_index.forInvestment(client, converter, target, interval, warnings)
-        label = str(target.getName())
+        security = resolve_security(handle, _require(name, scope))
+        index = performance_index.forInvestment(client, converter, security, interval, warnings)
+        label = str(security.getName())
     elif scope == "classification":
-        target = _resolve_classification(client, _require(name, scope))
-        index = performance_index.forClassification(client, converter, target, interval, warnings)
-        label = str(target.getName())
+        classification = _resolve_classification(client, _require(name, scope))
+        index = performance_index.forClassification(client, converter, classification, interval, warnings)
+        label = str(classification.getName())
     else:
         raise ToolError(
             f"unknown scope {scope!r}; use client, portfolio, account, security or classification"
@@ -119,7 +120,7 @@ def _require(name: str | None, scope: str) -> str:
     return name
 
 
-def _resolve_classification(client: Any, query: str) -> Any:
+def _resolve_classification(client: j.Client, query: str) -> j.Classification:
     needle = query.strip().casefold()
     matches = [
         classification
@@ -141,7 +142,7 @@ def _resolve_classification(client: Any, query: str) -> Any:
 # --- tools -----------------------------------------------------------------------------------
 
 
-def get_performance(period: str = "1Y", scope: str = "client", name: str | None = None) -> dict[str, Any]:
+def get_performance(period: str = "1Y", scope: str = "client", name: str | None = None) -> JsonObject:
     """Time-weighted return (TTWROR), IRR, drawdown and volatility for a reporting period.
 
     Args:
@@ -175,7 +176,7 @@ def get_performance(period: str = "1Y", scope: str = "client", name: str | None 
     }
 
 
-def get_performance_snapshot(period: str = "1Y") -> dict[str, Any]:
+def get_performance_snapshot(period: str = "1Y") -> JsonObject:
     """Where the change in value came from: capital gains, earnings, fees, taxes, transfers.
 
     Categories form a waterfall: the rows signed '', '+' and '-' add up to the '=' row
@@ -188,11 +189,10 @@ def get_performance_snapshot(period: str = "1Y") -> dict[str, Any]:
     """
     handle = get_client()
     interval, code = _interval(handle, period)
-    snapshot_class = jpype.JClass("name.abuchen.portfolio.snapshot.ClientPerformanceSnapshot")
-    category_type = jpype.JClass("name.abuchen.portfolio.snapshot.ClientPerformanceSnapshot$CategoryType")
-    snapshot = snapshot_class(handle.client, handle.converter, interval)
+    category_type = j.category_type()
+    snapshot = j.client_performance_snapshot()(handle.client, handle.converter, interval)
 
-    categories = []
+    categories: list[JsonObject] = []
     for type_ in category_type.values():
         category = snapshot.getCategoryByType(type_)
         value = convert.money_of(category.getValuation())
@@ -206,15 +206,14 @@ def get_performance_snapshot(period: str = "1Y") -> dict[str, Any]:
             "positions": category.getPositions().size(),
         })
 
-    def positions_of(type_name: str) -> list[dict[str, Any]]:
-        category = snapshot.getCategoryByType(getattr(category_type, type_name))
+    def positions_of(type_name: str) -> list[JsonObject]:
+        category = snapshot.getCategoryByType(category_type.valueOf(type_name))
         return [
             {"label": str(p.getLabel()), "value": convert.jsonable(convert.money(p.getValue()))}
             for p in category.getPositions()
         ]
 
-    index_class = jpype.JClass("name.abuchen.portfolio.snapshot.PerformanceIndex")
-    index = index_class.forClient(handle.client, handle.converter, interval, jpype.JClass("java.util.ArrayList")())
+    index = j.performance_index().forClient(handle.client, handle.converter, interval, j.array_list()())
 
     return {
         "period": {"requested": period, "code": code, **_interval_dates(interval)},
@@ -235,7 +234,7 @@ def get_security_performance(
     period: str = "1Y",
     cost_method: str = "FIFO",
     include_closed: bool = False,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Per-security returns over a period: IRR, TTWROR, capital gains, dividends, fees, taxes.
 
     Args:
@@ -245,26 +244,25 @@ def get_security_performance(
     """
     handle = get_client()
     interval, code = _interval(handle, period)
-    method_class = jpype.JClass("name.abuchen.portfolio.model.CostMethod")
-    taxes_and_fees = jpype.JClass("name.abuchen.portfolio.model.TaxesAndFees")
-    try:
-        method = getattr(method_class, cost_method.strip().upper())
-    except AttributeError as exc:
-        raise ToolError(f"cost_method must be FIFO or MOVING_AVERAGE, got {cost_method!r}") from exc
+    method_name = cost_method.strip().upper()
+    if method_name not in {"FIFO", "MOVING_AVERAGE"}:
+        raise ToolError(f"cost_method must be FIFO or MOVING_AVERAGE, got {cost_method!r}")
+    method = j.cost_method().valueOf(method_name)
+    included = j.taxes_and_fees().INCLUDED
 
-    snapshot_class = jpype.JClass("name.abuchen.portfolio.snapshot.security.LazySecurityPerformanceSnapshot")
-    snapshot = snapshot_class.create(handle.client, handle.converter, interval)
+    snapshot = j.security_performance_snapshot().create(handle.client, handle.converter, interval)
 
-    rows = []
+    ranked: list[tuple[Decimal, JsonObject]] = []
     for record in snapshot.getRecords():
         shares = convert.shares(int(record.getSharesHeld()))
         if not shares and not include_closed:
             continue
-        rows.append({
+        market_value = convert.money(record.getMarketValue())
+        ranked.append((market_value.amount if market_value else Decimal(0), {
             "security": str(record.getSecurityName()),
             "shares": convert.jsonable(shares),
-            "market_value": convert.jsonable(convert.money(record.getMarketValue())),
-            "cost": convert.jsonable(convert.money(record.getCost(method, taxes_and_fees.INCLUDED))),
+            "market_value": convert.jsonable(market_value),
+            "cost": convert.jsonable(convert.money(record.getCost(method, included))),
             "unrealized_gains": convert.jsonable(convert.money(record.getUnrealizedCapitalGains(method).getCapitalGains())),
             "realized_gains": convert.jsonable(convert.money(record.getRealizedCapitalGains(method).getCapitalGains())),
             "dividends": convert.jsonable(convert.money(record.getSumOfDividends())),
@@ -273,12 +271,13 @@ def get_security_performance(
             "irr": _percent(record.getIrr()),
             "ttwror": _percent(record.getTrueTimeWeightedRateOfReturn()),
             "ttwror_annualized": _percent(record.getTrueTimeWeightedRateOfReturnAnnualized()),
-        })
+        }))
 
-    rows.sort(key=lambda row: row["market_value"]["amount"], reverse=True)
+    ranked.sort(key=lambda row: row[0], reverse=True)
+    rows = [row for _, row in ranked]
     return {
         "period": {"requested": period, "code": code, **_interval_dates(interval)},
-        "cost_method": cost_method.strip().upper(),
+        "cost_method": method_name,
         "count": len(rows),
         "securities": rows,
         "note": "rates are fractions: 0.223 is 22.3%",
@@ -289,7 +288,7 @@ def get_dividends(
     period: str = "MAX",
     security: str | None = None,
     by: str = "year",
-) -> dict[str, Any]:
+) -> JsonObject:
     """Dividend income in the base currency, grouped by year or by security.
 
     Payments in other currencies are converted at the exchange rate on the payment date, as
@@ -303,7 +302,7 @@ def get_dividends(
     handle = get_client()
     interval, code = _interval(handle, period)
     start, end = convert.date_of(interval.getStart()), convert.date_of(interval.getEnd())
-    wanted = _resolve_security(handle, security) if security else None
+    wanted = resolve_security(handle, security) if security else None
     grouping = by.strip().lower()
     if grouping not in {"year", "security"}:
         raise ToolError("by must be 'year' or 'security'")
@@ -311,10 +310,12 @@ def get_dividends(
     converter = handle.converter
     currency = str(converter.getTermCurrency())
 
-    def in_base(when: Any, value: Any) -> Decimal:
+    def in_base(when: j.LocalDateTime, value: j.Money | None) -> Decimal:
+        if value is None:
+            return Decimal(0)
         return convert.money_of(converter.convert(when, value)).amount
 
-    groups: dict[str, dict[str, Any]] = {}
+    groups: dict[str, _DividendGroup] = {}
     total = Decimal(0)
     count = 0
 
@@ -340,20 +341,24 @@ def get_dividends(
 
             held = java_transaction.getSecurity()
             key = str(day.year) if grouping == "year" else (str(held.getName()) if held is not None else "unknown")
-            bucket = groups.setdefault(
-                key, {"key": key, "gross": Decimal(0), "net": Decimal(0), "taxes": Decimal(0), "count": 0}
-            )
-            bucket["gross"] += gross
-            bucket["net"] += net
-            bucket["taxes"] += taxes
-            bucket["count"] += 1
+            bucket = groups.setdefault(key, _DividendGroup(key))
+            bucket.gross += gross
+            bucket.net += net
+            bucket.taxes += taxes
+            bucket.count += 1
             total += net
             count += 1
 
-    rows = sorted(groups.values(), key=lambda row: row["key"])
-    for row in rows:
-        for field in ("gross", "net", "taxes"):
-            row[field] = round(float(row[field]), 2)
+    rows: list[JsonObject] = [
+        {
+            "key": group.key,
+            "gross": round(float(group.gross), 2),
+            "net": round(float(group.net), 2),
+            "taxes": round(float(group.taxes), 2),
+            "count": group.count,
+        }
+        for group in sorted(groups.values(), key=lambda group: group.key)
+    ]
 
     return {
         "period": {"requested": period, "code": code, **_interval_dates(interval)},
@@ -370,7 +375,7 @@ def get_performance_series(
     scope: str = "client",
     name: str | None = None,
     sampling: str = "monthly",
-) -> dict[str, Any]:
+) -> JsonObject:
     """The TTWROR curve and portfolio value over time, sampled to keep responses small.
 
     Args:
@@ -424,7 +429,16 @@ def get_performance_series(
     }
 
 
-ANALYTICS_TOOLS = [
+@dataclass
+class _DividendGroup:
+    key: str
+    gross: Decimal = Decimal(0)
+    net: Decimal = Decimal(0)
+    taxes: Decimal = Decimal(0)
+    count: int = 0
+
+
+ANALYTICS_TOOLS: list[Callable[..., JsonObject]] = [
     get_performance,
     get_performance_snapshot,
     get_security_performance,

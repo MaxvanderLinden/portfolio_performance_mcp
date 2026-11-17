@@ -24,6 +24,7 @@ dependencies = [
     "fastmcp>=4.0,<5",
     "jpype1>=1.7.1,<2",
     "mcp>=2.1,<3",
+    "typing-extensions>=4.12",
 ]
 
 [project.urls]
@@ -36,7 +37,7 @@ pp-read = "pp_mcp.server:main"  # original name, kept so existing registrations 
 pp-write = "pp_mcp.server:main_write"  # staged writes; register deliberately, see SAFETY.md
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pyright>=1.1.400"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -48,3 +49,10 @@ packages = ["src/pp_mcp"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+# JPype has no stubs; its untyped proxies are cast to protocols in src/pp_mcp/jtypes.py.
+reportMissingTypeStubs = false

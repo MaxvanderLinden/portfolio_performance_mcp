@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import sys
 
-import jpype
-
+from . import jtypes as j
 from .bridge import BridgeError, fingerprint, get_client
 from .config import ConfigError, load_config
 from .convert import account, money, portfolio, security
@@ -36,9 +35,7 @@ def main() -> int:
     )
     print(f"total assets: {marks.total_assets}")
 
-    snapshot_class = jpype.JClass("name.abuchen.portfolio.snapshot.ClientSnapshot")
-    local_date = jpype.JClass("java.time.LocalDate")
-    snapshot = snapshot_class.create(client, handle.converter, local_date.now())
+    snapshot = j.client_snapshot().create(client, handle.converter, j.local_date().now())
 
     print("\nportfolios")
     for position in snapshot.getPortfolios():

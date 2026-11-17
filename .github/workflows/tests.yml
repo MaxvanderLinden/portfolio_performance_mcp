@@ -22,4 +22,6 @@ jobs:
       # Portfolio Performance is not installed on the runners, so the integration tests skip;
       # config, conversion, platform-discovery and server-import tests still run.
       - run: python -m pytest -q -rs
+      # Strict typing for src/ (see [tool.pyright] in pyproject.toml); no Any.
+      - run: pyright --pythonpath "$(python -c 'import sys; print(sys.executable)')"
       - run: for f in scripts/*.sh; do bash -n "$f"; done
