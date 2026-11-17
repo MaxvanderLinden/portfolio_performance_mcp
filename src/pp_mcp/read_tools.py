@@ -11,7 +11,7 @@ Two conventions, both about keeping responses useful to a model:
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypeVar
@@ -27,6 +27,8 @@ MAX_PRICE_ROWS = 250
 MAX_TRANSACTION_ROWS = 100
 
 NamedT = TypeVar("NamedT", bound=j.Named)
+
+TRADE_TYPES = {"BUY", "SELL"}
 
 
 # --- helpers ---------------------------------------------------------------------------------
@@ -196,6 +198,9 @@ def get_transactions(
 ) -> JsonObject:
     """Transactions, most recent first, filtered by any combination of arguments.
 
+    A buy or sell is one row carrying both its portfolio and its cash account (Portfolio
+    Performance stores it as two linked legs). Transfers stay two rows, one per side.
+
     Args:
         security: UUID, ISIN, ticker or name fragment.
         account: cash account name (or fragment).
@@ -216,45 +221,61 @@ def get_transactions(
     rows: list[convert.TransactionInfo] = []
 
     def collect(
-        java_transactions: Iterable[j.Transaction],
-        *,
-        account_name: str | None = None,
-        portfolio_name: str | None = None,
+        java_transaction: j.Transaction,
+        account_name: str | None,
+        portfolio_name: str | None,
     ) -> None:
-        for java_transaction in java_transactions:
-            if wanted_security is not None and java_transaction.getSecurity() != wanted_security:
-                continue
-            info = convert.transaction(
-                java_transaction,
-                account_name=account_name,
-                portfolio_name=portfolio_name,
-                include_notes=include_notes,
-            )
-            if wanted_type and info.type != wanted_type:
-                continue
-            if from_date and info.datetime.date() < from_date:
-                continue
-            if to_date and info.datetime.date() > to_date:
-                continue
-            rows.append(info)
+        if wanted_security is not None and java_transaction.getSecurity() != wanted_security:
+            return
+        info = convert.transaction(
+            java_transaction,
+            account_name=account_name,
+            portfolio_name=portfolio_name,
+            include_notes=include_notes,
+        )
+        if wanted_type and info.type != wanted_type:
+            return
+        if from_date and info.datetime.date() < from_date:
+            return
+        if to_date and info.datetime.date() > to_date:
+            return
+        rows.append(info)
 
     accounts = list(handle.client.getAccounts())
     portfolios = list(handle.client.getPortfolios())
-    if account:
-        accounts = [resolve_named(accounts, account, "account")]
-    if portfolio:
-        portfolios = [resolve_named(portfolios, portfolio, "portfolio")]
+    wanted_account = resolve_named(accounts, account, "account") if account else None
+    wanted_portfolio = resolve_named(portfolios, portfolio, "portfolio") if portfolio else None
 
-    if not portfolio:
-        for java_account in accounts:
-            collect(java_account.getTransactions(), account_name=str(java_account.getName()))
-    if not account:
-        for java_portfolio in portfolios:
-            collect(java_portfolio.getTransactions(), portfolio_name=str(java_portfolio.getName()))
+    # Cash legs. A trade's cash leg is skipped here and reported with its securities leg below.
+    if wanted_portfolio is None:
+        for java_account in [wanted_account] if wanted_account else accounts:
+            name = str(java_account.getName())
+            for java_transaction in java_account.getTransactions():
+                if _trade_counterpart(java_transaction) is None:
+                    collect(java_transaction, name, None)
+
+    # Securities legs, with the cash account of a trade filled in.
+    for java_portfolio in [wanted_portfolio] if wanted_portfolio else portfolios:
+        name = str(java_portfolio.getName())
+        for java_transaction in java_portfolio.getTransactions():
+            cash = _trade_counterpart(java_transaction)
+            if wanted_account is not None and (
+                cash is None or str(cash.getUUID()) != str(wanted_account.getUUID())
+            ):
+                continue
+            collect(java_transaction, str(cash.getName()) if cash else None, name)
 
     rows.sort(key=lambda row: row.datetime, reverse=True)
     meta = _capped(rows, limit, "most recent")
     return {**meta, "transactions": convert.jsonable(rows[:limit])}
+
+
+def _trade_counterpart(transaction: j.Transaction) -> j.TransactionOwner | None:
+    """For one leg of a buy or sell, the owner of the other leg (portfolio or cash account)."""
+    if str(transaction.getType().name()) not in TRADE_TYPES:
+        return None
+    cross = transaction.getCrossEntry()
+    return cross.getCrossOwner(transaction) if cross is not None else None
 
 
 def get_prices(

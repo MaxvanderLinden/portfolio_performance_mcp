@@ -102,7 +102,7 @@ pointing it at your real file instead of the replica.
 | `list_securities` | securities with latest price, `include_retired` optional |
 | `list_accounts` / `list_portfolios` | current cash balances / market values |
 | `get_holdings` | every position and account with share of total, optionally on a past date |
-| `get_transactions` | filtered by security, account, portfolio, type, date range |
+| `get_transactions` | filtered by security, account, portfolio, type, date range; a buy or sell is one row with both its portfolio and cash account |
 | `get_prices` | history plus the latest quote, with a summary of the full range |
 | `list_taxonomies` / `get_allocation` | classification schemes and the breakdown by one |
 | `get_performance` | TTWROR, annualized, IRR, max drawdown, volatility for a period and scope |
@@ -134,21 +134,31 @@ When you are happy with the changes, quit Portfolio Performance and promote them
 PP_LIVE_FILE="/path/to/your/portfolio.xml" ./scripts/promote-staged.sh
 ```
 
-It refuses if the app is running or if your file changed since the replica was taken, asks for
-confirmation at the terminal, backs up your file, and refreshes the replica. Register `pp-write`
+It refuses if the app is running (or if it cannot tell) or if your file changed since the
+replica was taken, asks for confirmation at the terminal, backs up your file, and refreshes the
+replica. On Windows, run it from Git Bash or WSL; that path is untested so far. Register `pp-write`
 only while you are editing (`claude mcp add portfolio-write -- "$PWD/.venv/bin/pp-write"`), and
 read [SAFETY.md](SAFETY.md) first.
 
 | tool | does |
 | --- | --- |
 | `add_prices` | adds prices to one security for dates that have none; refuses if any date already has one |
-| `record_cash` | `DEPOSIT`, `REMOVAL`, `INTEREST`, `INTEREST_CHARGE`, `FEES`, `FEES_REFUND`, `TAXES`, `TAX_REFUND` on one account; refuses a likely duplicate unless `allow_duplicate` |
+| `record_cash` | `DEPOSIT`, `REMOVAL`, `INTEREST`, `INTEREST_CHARGE`, `FEES`, `FEES_REFUND`, `TAXES`, `TAX_REFUND` on one account, optionally linked to a `security`, with `tax` withheld for interest; refuses a likely duplicate unless `allow_duplicate` |
+| `add_security` | a new security (name, currency, optional ISIN / ticker / WKN); refuses one whose ISIN, ticker or name is already taken |
+| `record_buy` / `record_sell` | a trade in one portfolio, settled on its reference account (or `account`); `price` or `total`, plus `fees` and `taxes`; `exchange_rate` when the security trades in another currency; a sell is refused if the portfolio would hold too few shares on that date or any later one |
+| `record_dividend` | a dividend on an account (`amount` is net), with `tax`, `fees` and `exchange_rate`; `shares` defaults to the shares held on that date |
+| `record_cash_transfer` | moves cash between two accounts in the same currency |
+| `record_share_transfer` | moves shares between two portfolios |
+| `record_delivery` | shares in or out of a portfolio without cash (`direction` inbound/outbound), e.g. a transfer from another broker |
+| `add_classification` | a new category in a taxonomy, at the top level or under a `parent` (id, name or path such as `Developed markets » Europe`); refuses a name its parent already has |
+| `assign_classification` | puts a `security` or `account` into a category with a `weight` in percent; refuses one already in that category or weights above 100% in the taxonomy |
 | `get_staged_changes` | what is staged, and whether it can still be promoted |
 | `discard_staged` | moves the staged copy to `backups/` and starts over from the replica |
 
 Write tools match securities and accounts exactly (UUID, ISIN, ticker or full name), never by a
-fragment, and refuse future dates. More (trades, dividends, transfers, taxonomy assignments) will
-follow.
+fragment, refuse future dates, and refuse a likely duplicate unless `allow_duplicate`. Every
+change must also pass Portfolio Performance's own consistency checks (the ones the app runs when
+it opens a file) before it is staged. Existing records, weights included, are never changed.
 
 ## Troubleshooting
 

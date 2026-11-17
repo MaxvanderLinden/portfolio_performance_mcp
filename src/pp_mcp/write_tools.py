@@ -14,19 +14,19 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Callable, Mapping
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import cast
 
 from fastmcp.exceptions import ToolError
 from typing_extensions import TypedDict
 
-from . import convert, staging
+from . import classification_tools, convert, staging, trade_tools
 from . import jtypes as j
+from . import write_common as w
 from .bridge import AMOUNT_FACTOR, QUOTE_FACTOR
 from .jsontypes import JsonObject
 
 MAX_PRICE_ROWS = 1000
-
 
 
 class PriceRow(TypedDict):
@@ -40,90 +40,8 @@ CASH_TYPES = (
     "DEPOSIT", "REMOVAL", "INTEREST", "INTEREST_CHARGE",
     "FEES", "FEES_REFUND", "TAXES", "TAX_REFUND",
 )
-
-
-# --- helpers ---------------------------------------------------------------------------------
-
-
-def _area() -> staging.StagingArea:
-    return staging.staging_area()
-
-
-def _past_date(value: object, field: str) -> dt.date:
-    try:
-        parsed = dt.date.fromisoformat(str(value).strip())
-    except ValueError as exc:
-        raise ToolError(f"{field} must be an ISO date like 2026-01-31, got {value!r}") from exc
-    if parsed > dt.date.today():
-        raise ToolError(f"{field} {parsed} is in the future; only past and current dates can be recorded")
-    return parsed
-
-
-def _fixed_point(value: object, factor: int, field: str, places: int) -> int:
-    """A positive decimal as PP's fixed-point long. Rejects more precision than PP stores,
-    rather than rounding it away silently."""
-    try:
-        number = Decimal(str(value).strip())
-    except (InvalidOperation, ValueError) as exc:
-        raise ToolError(f"{field} must be a number, got {value!r}") from exc
-    if not number.is_finite() or number <= 0:
-        raise ToolError(f"{field} must be greater than zero, got {value!r}")
-    if number != round(number, places):
-        raise ToolError(f"{field} has more than {places} decimal places: {value!r}")
-    return int(number * factor)
-
-
-# Ways to name a security or account exactly, most specific first.
-SECURITY_KEYS: tuple[Callable[[j.Security], j.JString | None], ...] = (
-    lambda s: s.getUUID(),
-    lambda s: s.getIsin(),
-    lambda s: s.getTickerSymbol(),
-    lambda s: s.getName(),
-)
-ACCOUNT_KEYS: tuple[Callable[[j.Account], j.JString], ...] = (
-    lambda a: a.getUUID(),
-    lambda a: a.getName(),
-)
-
-
-def _exact_security(client: j.Client, query: str) -> j.Security:
-    """UUID, ISIN, ticker or full name, exactly (case-insensitive). No fragments for writes."""
-    needle = str(query).strip().casefold()
-    if not needle:
-        raise ToolError("security must not be empty")
-    securities = list(client.getSecurities())
-    for key in SECURITY_KEYS:
-        found = [s for s in securities if (convert.text(key(s)) or "").casefold() == needle]
-        if len(found) == 1:
-            return found[0]
-        if len(found) > 1:
-            raise ToolError(f"{query!r} matches {len(found)} securities; use the UUID instead")
-    raise ToolError(
-        f"no security is exactly {query!r} (UUID, ISIN, ticker or full name). "
-        "Use list_securities to find it."
-    )
-
-
-def _exact_account(client: j.Client, query: str) -> j.Account:
-    needle = str(query).strip().casefold()
-    accounts = list(client.getAccounts())
-    for key in ACCOUNT_KEYS:
-        found = [a for a in accounts if str(key(a)).casefold() == needle]
-        if len(found) == 1:
-            return found[0]
-        if len(found) > 1:
-            raise ToolError(f"{query!r} matches {len(found)} accounts; use the UUID instead")
-    names = ", ".join(sorted(str(a.getName()) for a in accounts))
-    raise ToolError(f"no account is exactly {query!r}. Accounts: {names}")
-
-
-def _staged(
-    description: str, expected: dict[str, int], mutate: Callable[[j.Client], JsonObject]
-) -> staging.ApplyResult:
-    try:
-        return staging.apply(_area(), description, expected, mutate)
-    except staging.StagingError as exc:
-        raise ToolError(str(exc)) from exc
+# Types Portfolio Performance lets you attach to a security (e.g. a custody fee for one fund).
+SECURITY_CASH_TYPES = frozenset(CASH_TYPES) - {"DEPOSIT", "REMOVAL"}
 
 
 # --- write tools -----------------------------------------------------------------------------
@@ -151,13 +69,13 @@ def add_prices(security: str, prices: list[PriceRow]) -> staging.ApplyResult:
         fields = cast("Mapping[str, object]", row)
         if "date" not in fields or "value" not in fields:
             raise ToolError(f"prices[{index}] must look like {{\"date\": \"2026-10-31\", \"value\": 123.45}}")
-        when = _past_date(fields["date"], f"prices[{index}].date")
+        when = w.past_date(fields["date"], f"prices[{index}].date")
         if when in rows:
             raise ToolError(f"{when} appears more than once in prices")
-        rows[when] = _fixed_point(fields["value"], QUOTE_FACTOR, f"prices[{index}].value", 8)
+        rows[when] = w.fixed_point(fields["value"], QUOTE_FACTOR, f"prices[{index}].value", 8)
 
     def mutate(client: j.Client) -> JsonObject:
-        target = _exact_security(client, security)
+        target = w.exact_security(client, security)
         existing = {convert.date_of(p.getDate()) for p in target.getPrices()}
         clashes = sorted(d for d in rows if d in existing)
         if clashes:
@@ -181,7 +99,7 @@ def add_prices(security: str, prices: list[PriceRow]) -> staging.ApplyResult:
             "last": ordered[-1].isoformat(),
         }
 
-    return _staged(f"add {len(rows)} price(s) to {security}", {"prices": len(rows)}, mutate)
+    return w.staged(f"add {len(rows)} price(s) to {security}", {"prices": len(rows)}, mutate)
 
 
 def record_cash(
@@ -191,6 +109,8 @@ def record_cash(
     date: str,
     note: str | None = None,
     allow_duplicate: bool = False,
+    security: str | None = None,
+    tax: float | str | None = None,
 ) -> staging.ApplyResult:
     """Record a cash transaction on one account, in the account's currency.
 
@@ -200,20 +120,30 @@ def record_cash(
     Args:
         account: account UUID or full name, matched exactly.
         type: DEPOSIT, REMOVAL, INTEREST, INTEREST_CHARGE, FEES, FEES_REFUND, TAXES or TAX_REFUND.
-        amount: positive amount; the type gives the direction (REMOVAL takes money out).
+        amount: positive amount booked on the account; the type gives the direction (REMOVAL
+            takes money out). For INTEREST with tax withheld, this is the net amount received.
         date: ISO date, not in the future.
         note: optional note to store with the transaction, as the user worded it.
         allow_duplicate: record it even if an identical transaction exists.
+        security: optional security this relates to (UUID, ISIN, ticker or full name, exactly),
+            e.g. a custody fee for one fund. Not for DEPOSIT or REMOVAL.
+        tax: INTEREST only: tax withheld, so the gross interest is amount + tax.
     """
     kind = str(type).strip().upper()
     if kind not in CASH_TYPES:
         raise ToolError(f"type must be one of {', '.join(CASH_TYPES)}; got {type!r}")
-    when = _past_date(date, "date")
-    cents = _fixed_point(amount, AMOUNT_FACTOR, "amount", 2)
+    when = w.past_date(date, "date")
+    cents = w.fixed_point(amount, AMOUNT_FACTOR, "amount", 2)
     text = (note or "").strip() or None
+    if security is not None and kind not in SECURITY_CASH_TYPES:
+        raise ToolError(f"a {kind} cannot be linked to a security")
+    if tax is not None and kind != "INTEREST":
+        raise ToolError("tax can only be given for INTEREST (as tax withheld)")
+    tax_cents = w.fixed_point(tax, AMOUNT_FACTOR, "tax", 2) if tax is not None else None
 
     def mutate(client: j.Client) -> JsonObject:
-        target = _exact_account(client, account)
+        target = w.exact_account(client, account)
+        linked = w.exact_security(client, security) if security is not None else None
         if not allow_duplicate:
             for existing in target.getTransactions():
                 if (
@@ -232,6 +162,11 @@ def record_cash(
         transaction.setDateTime(j.local_date_time().of(when.year, when.month, when.day, 0, 0))
         transaction.setCurrencyCode(target.getCurrencyCode())
         transaction.setAmount(cents)
+        if linked is not None:
+            transaction.setSecurity(linked)
+        if tax_cents is not None:
+            withheld = j.money().of(target.getCurrencyCode(), tax_cents)
+            transaction.addUnit(j.unit()(j.unit_type().valueOf("TAX"), withheld))
         if text:
             transaction.setNote(text)
         transaction.setUpdatedAt(j.instant().now())
@@ -240,7 +175,7 @@ def record_cash(
         info = convert.transaction(transaction, account_name=str(target.getName()), include_notes=True)
         return {"transaction": convert.jsonable(info)}
 
-    return _staged(f"record {kind} on {account} for {date}", {f"account_tx:{kind}": 1}, mutate)
+    return w.staged(f"record {kind} on {account} for {date}", {f"account_tx:{kind}": 1}, mutate)
 
 
 def discard_staged() -> staging.DiscardResult:
@@ -250,7 +185,7 @@ def discard_staged() -> staging.DiscardResult:
     The user's real file and the replica are not touched.
     """
     try:
-        return staging.discard(_area())
+        return staging.discard(w.area())
     except staging.StagingError as exc:
         raise ToolError(str(exc)) from exc
 
@@ -264,8 +199,11 @@ def get_staged_changes() -> staging.Status:
     `up_to_date_with_replica` false means the replica was refreshed after staging; `unmodified`
     false means the staged file was edited outside pp-write. Either one blocks promoting.
     """
-    return staging.status(_area())
+    return staging.status(w.area())
 
 
-WRITE_TOOLS: list[Callable[..., object]] = [add_prices, record_cash, discard_staged]
+WRITE_TOOLS: list[Callable[..., object]] = [
+    add_prices, record_cash, *trade_tools.TRADE_TOOLS,
+    *classification_tools.CLASSIFICATION_TOOLS, discard_staged,
+]
 STAGED_READ_TOOLS: list[Callable[..., object]] = [get_staged_changes]
