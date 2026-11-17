@@ -13,17 +13,28 @@ and declares exactly which counters it adds to. Rules for adding a tool:
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import cast
 
-import jpype
 from fastmcp.exceptions import ToolError
+from typing_extensions import TypedDict
 
 from . import convert, staging
+from . import jtypes as j
 from .bridge import AMOUNT_FACTOR, QUOTE_FACTOR
+from .jsontypes import JsonObject
 
 MAX_PRICE_ROWS = 1000
+
+
+
+class PriceRow(TypedDict):
+    """One price for add_prices, in the security's currency."""
+
+    date: str
+    value: float | str
+
 
 CASH_TYPES = (
     "DEPOSIT", "REMOVAL", "INTEREST", "INTEREST_CHARGE",
@@ -38,15 +49,7 @@ def _area() -> staging.StagingArea:
     return staging.staging_area()
 
 
-def _model(name: str) -> Any:
-    return jpype.JClass(f"name.abuchen.portfolio.model.{name}")
-
-
-def _now() -> Any:
-    return jpype.JClass("java.time.Instant").now()
-
-
-def _past_date(value: str, field: str) -> dt.date:
+def _past_date(value: object, field: str) -> dt.date:
     try:
         parsed = dt.date.fromisoformat(str(value).strip())
     except ValueError as exc:
@@ -56,7 +59,7 @@ def _past_date(value: str, field: str) -> dt.date:
     return parsed
 
 
-def _fixed_point(value: Any, factor: int, field: str, places: int) -> int:
+def _fixed_point(value: object, factor: int, field: str, places: int) -> int:
     """A positive decimal as PP's fixed-point long. Rejects more precision than PP stores,
     rather than rounding it away silently."""
     try:
@@ -70,14 +73,27 @@ def _fixed_point(value: Any, factor: int, field: str, places: int) -> int:
     return int(number * factor)
 
 
-def _exact_security(client: Any, query: str) -> Any:
+# Ways to name a security or account exactly, most specific first.
+SECURITY_KEYS: tuple[Callable[[j.Security], j.JString | None], ...] = (
+    lambda s: s.getUUID(),
+    lambda s: s.getIsin(),
+    lambda s: s.getTickerSymbol(),
+    lambda s: s.getName(),
+)
+ACCOUNT_KEYS: tuple[Callable[[j.Account], j.JString], ...] = (
+    lambda a: a.getUUID(),
+    lambda a: a.getName(),
+)
+
+
+def _exact_security(client: j.Client, query: str) -> j.Security:
     """UUID, ISIN, ticker or full name, exactly (case-insensitive). No fragments for writes."""
     needle = str(query).strip().casefold()
     if not needle:
         raise ToolError("security must not be empty")
     securities = list(client.getSecurities())
-    for getter in ("getUUID", "getIsin", "getTickerSymbol", "getName"):
-        found = [s for s in securities if str(getattr(s, getter)() or "").casefold() == needle]
+    for key in SECURITY_KEYS:
+        found = [s for s in securities if (convert.text(key(s)) or "").casefold() == needle]
         if len(found) == 1:
             return found[0]
         if len(found) > 1:
@@ -88,11 +104,11 @@ def _exact_security(client: Any, query: str) -> Any:
     )
 
 
-def _exact_account(client: Any, query: str) -> Any:
+def _exact_account(client: j.Client, query: str) -> j.Account:
     needle = str(query).strip().casefold()
     accounts = list(client.getAccounts())
-    for getter in ("getUUID", "getName"):
-        found = [a for a in accounts if str(getattr(a, getter)() or "").casefold() == needle]
+    for key in ACCOUNT_KEYS:
+        found = [a for a in accounts if str(key(a)).casefold() == needle]
         if len(found) == 1:
             return found[0]
         if len(found) > 1:
@@ -101,7 +117,9 @@ def _exact_account(client: Any, query: str) -> Any:
     raise ToolError(f"no account is exactly {query!r}. Accounts: {names}")
 
 
-def _staged(description: str, expected: dict[str, int], mutate: Callable[[Any], dict[str, Any]]) -> dict[str, Any]:
+def _staged(
+    description: str, expected: dict[str, int], mutate: Callable[[j.Client], JsonObject]
+) -> staging.ApplyResult:
     try:
         return staging.apply(_area(), description, expected, mutate)
     except staging.StagingError as exc:
@@ -111,7 +129,7 @@ def _staged(description: str, expected: dict[str, int], mutate: Callable[[Any], 
 # --- write tools -----------------------------------------------------------------------------
 
 
-def add_prices(security: str, prices: list[dict[str, Any]]) -> dict[str, Any]:
+def add_prices(security: str, prices: list[PriceRow]) -> staging.ApplyResult:
     """Add historical prices to one security, in the security's own currency.
 
     Only dates without a price can be added: if any date already has one, nothing is staged and
@@ -129,14 +147,16 @@ def add_prices(security: str, prices: list[dict[str, Any]]) -> dict[str, Any]:
 
     rows: dict[dt.date, int] = {}
     for index, row in enumerate(prices):
-        if not isinstance(row, dict) or "date" not in row or "value" not in row:
+        # MCP clients are validated against PriceRow; direct Python callers are not.
+        fields = cast("Mapping[str, object]", row)
+        if "date" not in fields or "value" not in fields:
             raise ToolError(f"prices[{index}] must look like {{\"date\": \"2026-10-31\", \"value\": 123.45}}")
-        when = _past_date(row["date"], f"prices[{index}].date")
+        when = _past_date(fields["date"], f"prices[{index}].date")
         if when in rows:
             raise ToolError(f"{when} appears more than once in prices")
-        rows[when] = _fixed_point(row["value"], QUOTE_FACTOR, f"prices[{index}].value", 8)
+        rows[when] = _fixed_point(fields["value"], QUOTE_FACTOR, f"prices[{index}].value", 8)
 
-    def mutate(client: Any) -> dict[str, Any]:
+    def mutate(client: j.Client) -> JsonObject:
         target = _exact_security(client, security)
         existing = {convert.date_of(p.getDate()) for p in target.getPrices()}
         clashes = sorted(d for d in rows if d in existing)
@@ -147,11 +167,10 @@ def add_prices(security: str, prices: list[dict[str, Any]]) -> dict[str, Any]:
                 f"{target.getName()} already has prices on {shown}{more}. Existing prices are never "
                 "overwritten; leave those dates out and try again. Nothing was staged."
             )
-        SecurityPrice = _model("SecurityPrice")
-        LocalDate = jpype.JClass("java.time.LocalDate")
+        new_price, local_date = j.security_price(), j.local_date()
         for when, value in sorted(rows.items()):
-            target.addPrice(SecurityPrice(LocalDate.of(when.year, when.month, when.day), value), False)
-        target.setUpdatedAt(_now())
+            target.addPrice(new_price(local_date.of(when.year, when.month, when.day), value), False)
+        target.setUpdatedAt(j.instant().now())
         ordered = sorted(rows)
         return {
             "security": str(target.getName()),
@@ -172,7 +191,7 @@ def record_cash(
     date: str,
     note: str | None = None,
     allow_duplicate: bool = False,
-) -> dict[str, Any]:
+) -> staging.ApplyResult:
     """Record a cash transaction on one account, in the account's currency.
 
     Changes go to the staged copy only. If the account already has a transaction with the same
@@ -193,7 +212,7 @@ def record_cash(
     cents = _fixed_point(amount, AMOUNT_FACTOR, "amount", 2)
     text = (note or "").strip() or None
 
-    def mutate(client: Any) -> dict[str, Any]:
+    def mutate(client: j.Client) -> JsonObject:
         target = _exact_account(client, account)
         if not allow_duplicate:
             for existing in target.getTransactions():
@@ -208,14 +227,14 @@ def record_cash(
                         "allow_duplicate=true if this really is a second one."
                     )
 
-        transaction = _model("AccountTransaction")()
-        transaction.setType(_model("AccountTransaction$Type").valueOf(kind))
-        transaction.setDateTime(jpype.JClass("java.time.LocalDateTime").of(when.year, when.month, when.day, 0, 0))
+        transaction = j.account_transaction()()
+        transaction.setType(j.account_transaction_type().valueOf(kind))
+        transaction.setDateTime(j.local_date_time().of(when.year, when.month, when.day, 0, 0))
         transaction.setCurrencyCode(target.getCurrencyCode())
         transaction.setAmount(cents)
         if text:
             transaction.setNote(text)
-        transaction.setUpdatedAt(_now())
+        transaction.setUpdatedAt(j.instant().now())
         target.addTransaction(transaction)
 
         info = convert.transaction(transaction, account_name=str(target.getName()), include_notes=True)
@@ -224,7 +243,7 @@ def record_cash(
     return _staged(f"record {kind} on {account} for {date}", {f"account_tx:{kind}": 1}, mutate)
 
 
-def discard_staged() -> dict[str, Any]:
+def discard_staged() -> staging.DiscardResult:
     """Set aside every staged change and start over from the replica.
 
     The staged copy and its change log are moved to the staging folder's backups/, not deleted.
@@ -239,7 +258,7 @@ def discard_staged() -> dict[str, Any]:
 # --- staged reads ----------------------------------------------------------------------------
 
 
-def get_staged_changes() -> dict[str, Any]:
+def get_staged_changes() -> staging.Status:
     """List the changes staged so far, oldest first, and whether they can still be promoted.
 
     `up_to_date_with_replica` false means the replica was refreshed after staging; `unmodified`
@@ -248,5 +267,5 @@ def get_staged_changes() -> dict[str, Any]:
     return staging.status(_area())
 
 
-WRITE_TOOLS: list[Callable[..., Any]] = [add_prices, record_cash, discard_staged]
-STAGED_READ_TOOLS: list[Callable[..., Any]] = [get_staged_changes]
+WRITE_TOOLS: list[Callable[..., object]] = [add_prices, record_cash, discard_staged]
+STAGED_READ_TOOLS: list[Callable[..., object]] = [get_staged_changes]

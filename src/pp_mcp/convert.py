@@ -13,11 +13,14 @@ Two rules here:
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import asdict, dataclass, is_dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, fields, is_dataclass
 from decimal import Decimal
-from typing import Any
+from typing import cast
 
+from . import jtypes as j
 from .bridge import AMOUNT_FACTOR, QUOTE_FACTOR, SHARE_FACTOR
+from .jsontypes import JsonObject, JsonValue
 
 
 @dataclass(frozen=True)
@@ -120,7 +123,7 @@ def quote(value: int | None) -> Decimal | None:
 # --- Java object conversions ----------------------------------------------------------------
 
 
-def text(value: Any) -> str | None:
+def text(value: j.JString | None) -> str | None:
     """Java String (or null) to str. convertStrings=False means these arrive as Java objects."""
     if value is None:
         return None
@@ -128,13 +131,13 @@ def text(value: Any) -> str | None:
     return result or None
 
 
-def money(value: Any) -> Money | None:
+def money(value: j.Money | None) -> Money | None:
     if value is None:
         return None
     return Money(amount=Decimal(int(value.getAmount())) / AMOUNT_FACTOR, currency=str(value.getCurrencyCode()))
 
 
-def money_of(value: Any) -> Money:
+def money_of(value: j.Money | None) -> Money:
     """`money()` for a getter that is documented to never return null (e.g. getMonetaryAmount(),
     ClientSnapshot.getMonetaryAssets()). Fails loudly rather than silently if that ever changes."""
     converted = money(value)
@@ -142,20 +145,20 @@ def money_of(value: Any) -> Money:
     return converted
 
 
-def date(value: Any) -> dt.date | None:
+def date(value: j.LocalDate | None) -> dt.date | None:
     if value is None:
         return None
     return dt.date(int(value.getYear()), int(value.getMonthValue()), int(value.getDayOfMonth()))
 
 
-def date_of(value: Any) -> dt.date:
+def date_of(value: j.LocalDate | None) -> dt.date:
     """`date()` for a getter that is documented to never return null."""
     converted = date(value)
     assert converted is not None, "expected a non-null LocalDate from Portfolio Performance"
     return converted
 
 
-def datetime(value: Any) -> dt.datetime | None:
+def datetime(value: j.LocalDateTime | None) -> dt.datetime | None:
     if value is None:
         return None
     return dt.datetime(
@@ -168,14 +171,14 @@ def datetime(value: Any) -> dt.datetime | None:
     )
 
 
-def datetime_of(value: Any) -> dt.datetime:
+def datetime_of(value: j.LocalDateTime | None) -> dt.datetime:
     """`datetime()` for a getter that is documented to never return null."""
     converted = datetime(value)
     assert converted is not None, "expected a non-null LocalDateTime from Portfolio Performance"
     return converted
 
 
-def price(value: Any) -> Price:
+def price(value: j.SecurityPrice) -> Price:
     # A SecurityPrice row always has both fields; the None branches in date()/quote() exist for
     # other callers (e.g. a missing LatestSecurityPrice), not for this one.
     found_date = date(value.getDate())
@@ -184,7 +187,7 @@ def price(value: Any) -> Price:
     return Price(date=found_date, value=found_value)
 
 
-def latest_price(value: Any) -> LatestPrice | None:
+def latest_price(value: j.LatestSecurityPrice | None) -> LatestPrice | None:
     if value is None:
         return None
     volume = int(value.getVolume())
@@ -201,7 +204,7 @@ def latest_price(value: Any) -> LatestPrice | None:
     )
 
 
-def security(value: Any, *, include_notes: bool = False) -> SecurityInfo:
+def security(value: j.Security, *, include_notes: bool = False) -> SecurityInfo:
     prices = value.getPrices()
     return SecurityInfo(
         uuid=str(value.getUUID()),
@@ -219,7 +222,7 @@ def security(value: Any, *, include_notes: bool = False) -> SecurityInfo:
     )
 
 
-def account(value: Any, *, include_notes: bool = False) -> AccountInfo:
+def account(value: j.Account, *, include_notes: bool = False) -> AccountInfo:
     return AccountInfo(
         uuid=str(value.getUUID()),
         name=str(value.getName()),
@@ -229,7 +232,7 @@ def account(value: Any, *, include_notes: bool = False) -> AccountInfo:
     )
 
 
-def portfolio(value: Any, *, include_notes: bool = False) -> PortfolioInfo:
+def portfolio(value: j.Portfolio, *, include_notes: bool = False) -> PortfolioInfo:
     reference = value.getReferenceAccount()
     return PortfolioInfo(
         uuid=str(value.getUUID()),
@@ -240,7 +243,7 @@ def portfolio(value: Any, *, include_notes: bool = False) -> PortfolioInfo:
     )
 
 
-def _unit_totals(value: Any) -> tuple[Money | None, Money | None]:
+def _unit_totals(value: j.Transaction) -> tuple[Money | None, Money | None]:
     """Sum the FEE and TAX units attached to a transaction."""
     fees: Money | None = None
     taxes: Money | None = None
@@ -257,7 +260,7 @@ def _unit_totals(value: Any) -> tuple[Money | None, Money | None]:
 
 
 def transaction(
-    value: Any,
+    value: j.Transaction,
     *,
     account_name: str | None = None,
     portfolio_name: str | None = None,
@@ -295,16 +298,31 @@ def transaction(
 # --- boundary -------------------------------------------------------------------------------
 
 
-def jsonable(value: Any) -> Any:
-    """Recursively convert dataclasses, Decimals and dates for JSON tool responses."""
-    if is_dataclass(value) and not isinstance(value, type):
-        return jsonable(asdict(value))
-    if isinstance(value, dict):
-        return {key: jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [jsonable(item) for item in value]
+def jsonable(value: object) -> JsonValue:
+    """Recursively convert dataclasses, Decimals and dates for JSON tool responses.
+
+    Anything else that is not already JSON is a bug (a Java object leaking out), so it raises
+    rather than passing through."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
     if isinstance(value, Decimal):
         return float(value)
     if isinstance(value, (dt.date, dt.datetime)):
         return value.isoformat()
-    return value
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: jsonable(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, Mapping):
+        mapping = cast("Mapping[object, object]", value)
+        return {str(key): jsonable(item) for key, item in mapping.items()}
+    if isinstance(value, (list, tuple)):
+        items = cast("list[object] | tuple[object, ...]", value)
+        return [jsonable(item) for item in items]
+    raise TypeError(f"cannot represent {type(value).__name__} as JSON")
+
+
+def json_object(value: object) -> JsonObject:
+    """`jsonable()` for something that must become a JSON object (a dataclass or a mapping)."""
+    converted = jsonable(value)
+    if not isinstance(converted, dict):
+        raise TypeError(f"expected a JSON object, got {type(converted).__name__}")
+    return converted

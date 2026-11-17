@@ -11,27 +11,32 @@ Two conventions, both about keeping responses useful to a model:
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import TypeVar
 
-import jpype
 from fastmcp.exceptions import ToolError
 
 from . import convert
-from .bridge import get_client
+from . import jtypes as j
+from .bridge import ClientHandle, get_client
+from .jsontypes import JsonObject
 
 MAX_PRICE_ROWS = 250
 MAX_TRANSACTION_ROWS = 100
+
+NamedT = TypeVar("NamedT", bound=j.Named)
 
 
 # --- helpers ---------------------------------------------------------------------------------
 
 
-def _java_date(value: dt.date) -> Any:
-    return jpype.JClass("java.time.LocalDate").of(value.year, value.month, value.day)
+def _java_date(value: dt.date) -> j.LocalDate:
+    return j.local_date().of(value.year, value.month, value.day)
 
 
-def _parse_date(value: str | None, field: str) -> dt.date | None:
+def parse_date(value: str | None, field: str) -> dt.date | None:
     if value is None:
         return None
     try:
@@ -40,21 +45,28 @@ def _parse_date(value: str | None, field: str) -> dt.date | None:
         raise ToolError(f"{field} must be an ISO date like 2026-01-31, got {value!r}") from exc
 
 
-def _snapshot(handle, on: dt.date | None = None) -> Any:
-    snapshot_class = jpype.JClass("name.abuchen.portfolio.snapshot.ClientSnapshot")
-    when = _java_date(on) if on else jpype.JClass("java.time.LocalDate").now()
-    return snapshot_class.create(handle.client, handle.converter, when)
+def _snapshot(handle: ClientHandle, on: dt.date | None = None) -> j.ClientSnapshot:
+    when = _java_date(on) if on else j.local_date().now()
+    return j.client_snapshot().create(handle.client, handle.converter, when)
 
 
-def _resolve_security(handle, query: str) -> Any:
+# How a security can be named, most specific first.
+SECURITY_KEYS: tuple[Callable[[j.Security], j.JString | None], ...] = (
+    lambda s: s.getUUID(),
+    lambda s: s.getIsin(),
+    lambda s: s.getTickerSymbol(),
+)
+
+
+def resolve_security(handle: ClientHandle, query: str) -> j.Security:
     """Accept a UUID, ISIN, ticker or (part of a) name. Ambiguity is an error, not a guess."""
     needle = query.strip().casefold()
     if not needle:
         raise ToolError("security must not be empty")
 
     securities = list(handle.client.getSecurities())
-    for attribute in ("getUUID", "getIsin", "getTickerSymbol"):
-        exact = [s for s in securities if (getattr(s, attribute)() or "") and str(getattr(s, attribute)()).casefold() == needle]
+    for key in SECURITY_KEYS:
+        exact = [s for s in securities if (convert.text(key(s)) or "").casefold() == needle]
         if len(exact) == 1:
             return exact[0]
 
@@ -74,7 +86,7 @@ def _resolve_security(handle, query: str) -> Any:
     )
 
 
-def _resolve_named(items: list[Any], query: str, kind: str) -> Any:
+def resolve_named(items: list[NamedT], query: str, kind: str) -> NamedT:
     needle = query.strip().casefold()
     exact = [i for i in items if str(i.getName()).casefold() == needle]
     if len(exact) == 1:
@@ -86,7 +98,7 @@ def _resolve_named(items: list[Any], query: str, kind: str) -> Any:
     raise ToolError(f"no unique {kind} matches {query!r}. Available: {names}")
 
 
-def _capped(rows: list[Any], limit: int, order: str) -> dict[str, Any]:
+def _capped(rows: Sequence[object], limit: int, order: str) -> JsonObject:
     total = len(rows)
     return {
         "total_matching": total,
@@ -99,7 +111,7 @@ def _capped(rows: list[Any], limit: int, order: str) -> dict[str, Any]:
 # --- tools -----------------------------------------------------------------------------------
 
 
-def list_securities(include_retired: bool = False) -> dict[str, Any]:
+def list_securities(include_retired: bool = False) -> JsonObject:
     """List the securities in the portfolio, with their latest known price.
 
     Args:
@@ -111,58 +123,59 @@ def list_securities(include_retired: bool = False) -> dict[str, Any]:
         for s in handle.client.getSecurities()
         if include_retired or not bool(s.isRetired())
     ]
-    return convert.jsonable({"count": len(securities), "securities": securities})
+    return convert.json_object({"count": len(securities), "securities": securities})
 
 
-def list_accounts() -> dict[str, Any]:
+def list_accounts() -> JsonObject:
     """List cash accounts with their current balances."""
     handle = get_client()
     snapshot = _snapshot(handle)
     accounts = [
-        {**convert.jsonable(convert.account(position.getAccount())),
+        {**convert.json_object(convert.account(position.getAccount())),
          "balance": convert.jsonable(convert.money(position.getFunds()))}
         for position in snapshot.getAccounts()
     ]
     return {"count": len(accounts), "accounts": accounts}
 
 
-def list_portfolios() -> dict[str, Any]:
+def list_portfolios() -> JsonObject:
     """List securities accounts (portfolios) with their current market value."""
     handle = get_client()
     snapshot = _snapshot(handle)
     portfolios = [
-        {**convert.jsonable(convert.portfolio(position.getPortfolio())),
+        {**convert.json_object(convert.portfolio(position.getPortfolio())),
          "value": convert.jsonable(convert.money(position.getValue()))}
         for position in snapshot.getPortfolios()
     ]
     return {"count": len(portfolios), "portfolios": portfolios}
 
 
-def get_holdings(date: str | None = None) -> dict[str, Any]:
+def get_holdings(date: str | None = None) -> JsonObject:
     """Current holdings — every security position and cash account, with share of total assets.
 
     Args:
         date: value the portfolio on this ISO date instead of today.
     """
     handle = get_client()
-    on = _parse_date(date, "date")
+    on = parse_date(date, "date")
     snapshot = _snapshot(handle, on)
 
-    holdings = []
+    rows: list[tuple[Decimal, JsonObject]] = []
     for position in snapshot.getAssetPositions().toList():
         security_position = position.getPosition()
-        vehicle = position.getInvestmentVehicle()
-        is_security = position.getSecurity() is not None
-        holdings.append({
+        held = position.getSecurity()
+        value = convert.money_of(position.getValuation())
+        rows.append((value.amount, {
             "name": str(position.getDescription()),
-            "kind": "SECURITY" if is_security else "ACCOUNT",
-            "isin": convert.text(position.getSecurity().getIsin()) if is_security else None,
+            "kind": "SECURITY" if held is not None else "ACCOUNT",
+            "isin": convert.text(held.getIsin()) if held is not None else None,
             "shares": convert.jsonable(convert.shares(int(security_position.getShares()))) if security_position is not None else None,
-            "value": convert.jsonable(convert.money(position.getValuation())),
+            "value": convert.jsonable(value),
             "share_of_total": round(float(position.getShare()), 6),
-        })
+        }))
 
-    holdings.sort(key=lambda row: row["value"]["amount"], reverse=True)
+    rows.sort(key=lambda row: row[0], reverse=True)
+    holdings: list[JsonObject] = [row for _, row in rows]
     return {
         "date": (on or dt.date.today()).isoformat(),
         "total_assets": convert.jsonable(convert.money(snapshot.getMonetaryAssets())),
@@ -180,7 +193,7 @@ def get_transactions(
     end: str | None = None,
     limit: int = MAX_TRANSACTION_ROWS,
     include_notes: bool = False,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Transactions, most recent first, filtered by any combination of arguments.
 
     Args:
@@ -194,19 +207,29 @@ def get_transactions(
         include_notes: include free-text notes stored in the file.
     """
     handle = get_client()
-    wanted_security = _resolve_security(handle, security) if security else None
-    from_date = _parse_date(start, "start")
-    to_date = _parse_date(end, "end")
+    wanted_security = resolve_security(handle, security) if security else None
+    from_date = parse_date(start, "start")
+    to_date = parse_date(end, "end")
     wanted_type = type.strip().upper() if type else None
     limit = max(1, min(int(limit), 1000))
 
     rows: list[convert.TransactionInfo] = []
 
-    def collect(container, java_transactions, **names):
+    def collect(
+        java_transactions: Iterable[j.Transaction],
+        *,
+        account_name: str | None = None,
+        portfolio_name: str | None = None,
+    ) -> None:
         for java_transaction in java_transactions:
             if wanted_security is not None and java_transaction.getSecurity() != wanted_security:
                 continue
-            info = convert.transaction(java_transaction, include_notes=include_notes, **names)
+            info = convert.transaction(
+                java_transaction,
+                account_name=account_name,
+                portfolio_name=portfolio_name,
+                include_notes=include_notes,
+            )
             if wanted_type and info.type != wanted_type:
                 continue
             if from_date and info.datetime.date() < from_date:
@@ -218,16 +241,16 @@ def get_transactions(
     accounts = list(handle.client.getAccounts())
     portfolios = list(handle.client.getPortfolios())
     if account:
-        accounts = [_resolve_named(accounts, account, "account")]
+        accounts = [resolve_named(accounts, account, "account")]
     if portfolio:
-        portfolios = [_resolve_named(portfolios, portfolio, "portfolio")]
+        portfolios = [resolve_named(portfolios, portfolio, "portfolio")]
 
     if not portfolio:
         for java_account in accounts:
-            collect(java_account, java_account.getTransactions(), account_name=str(java_account.getName()))
+            collect(java_account.getTransactions(), account_name=str(java_account.getName()))
     if not account:
         for java_portfolio in portfolios:
-            collect(java_portfolio, java_portfolio.getTransactions(), portfolio_name=str(java_portfolio.getName()))
+            collect(java_portfolio.getTransactions(), portfolio_name=str(java_portfolio.getName()))
 
     rows.sort(key=lambda row: row.datetime, reverse=True)
     meta = _capped(rows, limit, "most recent")
@@ -239,7 +262,7 @@ def get_prices(
     start: str | None = None,
     end: str | None = None,
     limit: int = MAX_PRICE_ROWS,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Historical prices for one security, most recent first, with a summary of the whole range.
 
     Args:
@@ -249,9 +272,9 @@ def get_prices(
         limit: maximum rows; the summary always covers every matching price.
     """
     handle = get_client()
-    java_security = _resolve_security(handle, security)
-    from_date = _parse_date(start, "start")
-    to_date = _parse_date(end, "end")
+    java_security = resolve_security(handle, security)
+    from_date = parse_date(start, "start")
+    to_date = parse_date(end, "end")
     limit = max(1, min(int(limit), 2000))
 
     # getPrices() holds history only; the latest quote lives beside it, as in the app's chart.
@@ -261,7 +284,7 @@ def get_prices(
     if to_date:
         prices = [p for p in prices if p.date <= to_date]
 
-    summary: dict[str, Any] = {"count": len(prices)}
+    summary: JsonObject = {"count": len(prices)}
     if prices:
         values = [p.value for p in prices]
         low, high = min(prices, key=lambda p: p.value), max(prices, key=lambda p: p.value)
@@ -284,14 +307,19 @@ def get_prices(
     }
 
 
-def list_taxonomies() -> dict[str, Any]:
+def _dimensions(taxonomy: j.Taxonomy) -> list[str]:
+    dimensions = taxonomy.getDimensions()
+    return [str(d).strip() for d in dimensions] if dimensions else []
+
+
+def list_taxonomies() -> JsonObject:
     """List the classification schemes (taxonomies) defined in the file."""
     handle = get_client()
     taxonomies = [
         {
             "id": str(t.getId()),
             "name": str(t.getName()),
-            "dimensions": [str(d).strip() for d in t.getDimensions()] if t.getDimensions() else [],
+            "dimensions": _dimensions(t),
             "classifications": t.getAllClassifications().size(),
         }
         for t in handle.client.getTaxonomies()
@@ -299,14 +327,16 @@ def list_taxonomies() -> dict[str, Any]:
     return {"count": len(taxonomies), "taxonomies": taxonomies}
 
 
-def _without_exact(node: dict[str, Any]) -> dict[str, Any]:
-    node.pop("_exact", None)
-    for child in node.get("children", []):
-        _without_exact(child)
-    return node
+@dataclass
+class _Node:
+    """A classification with its exact value, before rounding for the response."""
+
+    name: str
+    total: Decimal
+    children: list[_Node]
 
 
-def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> dict[str, Any]:
+def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> JsonObject:
     """Break current assets down by one taxonomy, following PP's assignment weights.
 
     Args:
@@ -318,7 +348,7 @@ def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> di
     correct when unclassified cash is negative, as a margin account is.
     """
     handle = get_client()
-    on = _parse_date(date, "date")
+    on = parse_date(date, "date")
     snapshot = _snapshot(handle, on)
 
     taxonomies = list(handle.client.getTaxonomies())
@@ -332,16 +362,16 @@ def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> di
     chosen = matches[0]
 
     by_vehicle = snapshot.getPositionsByVehicle()
-    hundred_percent = int(jpype.JClass("name.abuchen.portfolio.model.Classification").ONE_HUNDRED_PERCENT)
-    assigned_weight: dict[Any, int] = {}
+    hundred_percent = int(j.classification().ONE_HUNDRED_PERCENT)
+    assigned_weight: dict[j.InvestmentVehicle, int] = {}
 
-    def valuation_of(vehicle: Any) -> Decimal:
+    def valuation_of(vehicle: j.InvestmentVehicle) -> Decimal:
         position = by_vehicle.get(vehicle)
         if position is None:
             return Decimal(0)
         return convert.money_of(position.getValuation()).amount
 
-    def walk(classification: Any, level: int) -> dict[str, Any]:
+    def walk(classification: j.Classification) -> _Node:
         direct = Decimal(0)
         for assignment in classification.getAssignments():
             vehicle = assignment.getInvestmentVehicle()
@@ -349,19 +379,18 @@ def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> di
             assigned_weight[vehicle] = assigned_weight.get(vehicle, 0) + weight
             direct += valuation_of(vehicle) * weight / hundred_percent
 
-        children = [walk(child, level + 1) for child in classification.getChildren()]
-        total = direct + sum(child["_exact"] for child in children)
-        node: dict[str, Any] = {
-            "name": str(classification.getName()),
-            "value": round(float(total), 2),
-            "_exact": total,
-        }
-        if children and level < depth:
-            node["children"] = [_without_exact(child) for child in children if child["_exact"]]
-        return node
+        children = [walk(child) for child in classification.getChildren()]
+        total = direct + sum((child.total for child in children), Decimal(0))
+        return _Node(name=str(classification.getName()), total=total, children=children)
 
-    root = walk(chosen.getRoot(), 0)
-    classified = root["_exact"]
+    def render(node: _Node, level: int) -> JsonObject:
+        out: JsonObject = {"name": node.name, "value": round(float(node.total), 2)}
+        if node.children and level < depth:
+            out["children"] = [render(child, level + 1) for child in node.children if child.total]
+        return out
+
+    root = walk(chosen.getRoot())
+    classified = root.total
 
     unassigned = Decimal(0)
     for entry in by_vehicle.entrySet():
@@ -371,9 +400,13 @@ def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> di
             unassigned += valuation_of(vehicle) * remaining / hundred_percent
 
     total_assets = convert.money_of(snapshot.getMonetaryAssets())
-    buckets = root.get("children", [])
-    for bucket in buckets:
-        bucket["share_of_total"] = round(bucket["value"] / float(total_assets.amount), 6)
+    buckets: list[JsonObject] = []
+    if depth > 0:
+        for child in root.children:
+            if child.total:
+                bucket = render(child, 1)
+                bucket["share_of_total"] = round(round(float(child.total), 2) / float(total_assets.amount), 6)
+                buckets.append(bucket)
 
     return {
         "taxonomy": str(chosen.getName()),
@@ -386,7 +419,7 @@ def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> di
     }
 
 
-TOOLS = [
+TOOLS: list[Callable[..., JsonObject]] = [
     list_securities,
     list_accounts,
     list_portfolios,

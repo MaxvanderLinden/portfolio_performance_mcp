@@ -7,6 +7,8 @@ only, and `tests/test_server.py` checks that building the read server leaves the
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
@@ -69,7 +71,7 @@ def read_write() -> FastMCP:
     return server
 
 
-def _run(build) -> None:
+def _run(build: Callable[[], FastMCP]) -> None:
     try:
         server = build()
         get_client()  # load the source now, so a broken setup fails before we speak MCP

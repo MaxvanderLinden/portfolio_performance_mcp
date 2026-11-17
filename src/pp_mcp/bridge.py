@@ -14,10 +14,9 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Callable, Mapping
-from typing import Any
-
 import jpype
 
+from . import jtypes as j
 from .config import Config, load_config
 
 # Fixed-point scaling used throughout the PP model; verified against Values.* at startup.
@@ -53,8 +52,8 @@ class Fingerprint:
 class ClientHandle:
     """A loaded portfolio, plus the file identity it was loaded from."""
 
-    client: Any
-    converter: Any
+    client: j.Client
+    converter: j.CurrencyConverter
     path: Path
     mtime_ns: int
     size: int
@@ -143,7 +142,7 @@ def start_jvm(config: Config | None = None) -> None:
         if not jpype.isJVMStarted():
             libjvm = find_libjvm(config)
             try:
-                jpype.startJVM(str(libjvm), classpath=find_classpath(config), convertStrings=False)
+                j.jpype_module().startJVM(str(libjvm), classpath=find_classpath(config), convertStrings=False)
             except OSError as exc:
                 raise BridgeError(
                     f"Could not start the Java runtime at {libjvm}: {exc}. A common cause is a CPU "
@@ -155,7 +154,7 @@ def start_jvm(config: Config | None = None) -> None:
 
 def _verify_scaling_factors() -> None:
     """Guard against a future PP release changing its fixed-point scaling under us."""
-    values = jpype.JClass("name.abuchen.portfolio.money.Values")
+    values = j.values()
     actual = {
         "Amount": (int(values.Amount.factor()), AMOUNT_FACTOR),
         "Share": (int(values.Share.factor()), SHARE_FACTOR),
@@ -173,19 +172,16 @@ def ensure_thread_attached() -> None:
     """FastMCP runs sync tools in worker threads; JPype needs each one attached to the JVM."""
     if not jpype.isJVMStarted():
         return
-    thread = jpype.JClass("java.lang.Thread")
+    thread = j.thread()
     if not thread.isAttached():
         thread.attach()
 
 
 def _load(config: Config) -> ClientHandle:
     stat = config.source.stat()
-    ClientFactory = jpype.JClass("name.abuchen.portfolio.model.ClientFactory")
-    FileInputStream = jpype.JClass("java.io.FileInputStream")
-
-    stream = FileInputStream(str(config.source))
+    stream = j.file_input_stream()(str(config.source))
     try:
-        client = ClientFactory.load(stream)
+        client = j.client_factory().load(stream)
     except jpype.JException as exc:  # pragma: no cover - depends on a broken file
         raise BridgeError(f"Could not load {config.source}: {exc.message()}") from exc
     finally:
@@ -200,10 +196,9 @@ def _load(config: Config) -> ClientHandle:
     )
 
 
-def currency_converter(client: Any, currency: str | None = None) -> Any:
-    factory = jpype.JClass("name.abuchen.portfolio.money.ExchangeRateProviderFactory")(client)
-    impl = jpype.JClass("name.abuchen.portfolio.money.CurrencyConverterImpl")
-    return impl(factory, currency or str(client.getBaseCurrency()))
+def currency_converter(client: j.Client, currency: str | None = None) -> j.CurrencyConverter:
+    factory = j.exchange_rate_provider_factory()(client)
+    return j.currency_converter_impl()(factory, currency or str(client.getBaseCurrency()))
 
 
 def set_config_provider(provider: "Callable[[], Config] | None") -> None:
@@ -237,9 +232,7 @@ def fingerprint(handle: ClientHandle) -> Fingerprint:
     portfolios = list(client.getPortfolios())
     securities = list(client.getSecurities())
 
-    snapshot_class = jpype.JClass("name.abuchen.portfolio.snapshot.ClientSnapshot")
-    local_date = jpype.JClass("java.time.LocalDate")
-    snapshot = snapshot_class.create(client, handle.converter, local_date.now())
+    snapshot = j.client_snapshot().create(client, handle.converter, j.local_date().now())
 
     return Fingerprint(
         securities=len(securities),

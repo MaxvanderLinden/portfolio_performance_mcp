@@ -7,6 +7,12 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m pytest
 ```
 
+Type-check with pyright in strict mode (CI runs this too):
+
+```bash
+./.venv/bin/pyright --pythonpath .venv/bin/python
+```
+
 Dependencies are pinned in `uv.lock` (`uv sync --extra dev` reproduces the environment).
 
 The integration tests run against `tests/fixtures/demo.xml`, a **fictional** portfolio — never your
@@ -39,6 +45,10 @@ Performance's own classes:
   The JVM cannot be restarted in-process; `reset_for_tests()` only drops the cache.
 - **Enum names, not labels.** `transaction.type` is `BUY`; `type_label` is whatever the app's
   language shows (e.g. "Aankoop" in Dutch). Never match on the label.
+- **No `Any`.** JPype's proxies are untyped, so every Java class is looked up in `jtypes.py` and
+  cast to a `Protocol` listing the members we call; add a member there before calling it. Tool
+  responses are `JsonObject` (`jsontypes.py`) or a `TypedDict`, which also gives MCP clients a real
+  output schema.
 - **Decimals, not floats.** Money, shares and quotes are fixed-point longs in Java (÷100, ÷10⁸,
   ÷10⁸, verified against `Values.*` at startup). They become `Decimal`; `jsonable()` converts at
   the boundary.
