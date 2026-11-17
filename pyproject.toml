@@ -1,7 +1,7 @@
 [project]
 name = "pp-mcp"
 version = "0.1.0"
-description = "Read-only MCP server for a local Portfolio Performance file"
+description = "MCP server for a local Portfolio Performance file: read-only, with optional staged writes"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -33,6 +33,7 @@ Issues = "https://github.com/MaxvanderLinden/portfolio_performance_mcp/issues"
 [project.scripts]
 pp-mcp = "pp_mcp.server:main"
 pp-read = "pp_mcp.server:main"  # original name, kept so existing registrations keep working
+pp-write = "pp_mcp.server:main_write"  # staged writes; register deliberately, see SAFETY.md
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
