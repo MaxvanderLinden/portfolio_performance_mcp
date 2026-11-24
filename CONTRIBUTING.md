@@ -33,7 +33,7 @@ Dependencies are pinned in `uv.lock` (`uv sync --extra dev` reproduces the envir
 
 The integration tests run against `tests/fixtures/demo.xml`, a **fictional** portfolio — never your
 own data. They need Portfolio Performance installed (set `PP_APP_PATH` if it is not in the default
-place) and skip when it is missing. CI runs them on Linux with a pinned Portfolio Performance;
+place) and skip when it is missing. CI runs them on Linux with pinned Portfolio Performance versions;
 the other platforms run the config, conversion, lookup, script, platform-discovery and
 server-import tests.
 
