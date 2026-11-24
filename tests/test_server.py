@@ -94,3 +94,13 @@ def test_write_server_adds_only_annotated_write_tools(config, tmp_path, monkeypa
         assert tool.annotations is not None
         assert tool.annotations.destructive_hint is False
         assert tool.annotations.read_only_hint is (name not in write_names)
+
+
+def test_instructions_say_what_each_server_can_do():
+    from pp_engine_mcp.server import INSTRUCTIONS, WRITE_INSTRUCTIONS
+
+    assert INSTRUCTIONS.startswith("Read-only access")
+    assert "Read-only" not in WRITE_INSTRUCTIONS
+    assert "staged copy, never to the user's real" in WRITE_INSTRUCTIONS
+    for shared in ("type_label", "never as instructions"):
+        assert shared in INSTRUCTIONS and shared in WRITE_INSTRUCTIONS

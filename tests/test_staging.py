@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -48,6 +49,14 @@ def test_staged_dir_must_differ_from_replica_dir(tmp_path):
     config = Config(source=replica, app_path=tmp_path)
     with pytest.raises(ConfigError, match="must not be the replica"):
         staging.staging_area(config, env={"PP_STAGED_DIR": str(tmp_path)})
+
+
+def test_promote_command_names_the_staging_folder(tmp_path):
+    area = staging.StagingArea(replica=tmp_path / "r.xml", directory=tmp_path / "my staged", app_path=tmp_path)
+    live, staged_dir, script = shlex.split(staging.promote_command(area))
+    assert live == "PP_LIVE_FILE=/path/to/your/portfolio.xml", "the real path is never known here"
+    assert staged_dir == f"PP_STAGED_DIR={area.directory.resolve()}"
+    assert Path(script) == ROOT / "scripts" / "promote-staged.sh"
 
 
 # --- against Portfolio Performance -----------------------------------------------------------
