@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 
 from pp_engine_mcp import convert
@@ -17,7 +18,9 @@ def test_fingerprint_is_populated(handle):
     marks = fingerprint(handle)
     assert marks.securities > 0
     assert marks.transactions > 0
-    assert marks.total_assets.split()[0] == str(handle.client.getBaseCurrency())
+    currency, number = marks.total_assets.split()
+    assert currency == str(handle.client.getBaseCurrency())
+    assert re.fullmatch(r"-?\d{1,3}(,\d{3})*\.\d{2}", number), "the same format in every locale"
 
 
 def test_securities_convert(handle):
