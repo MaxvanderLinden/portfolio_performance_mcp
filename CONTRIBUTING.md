@@ -1,5 +1,20 @@
 # Contributing
 
+## Submitting a change
+
+Only the maintainer can merge, so contributions come in through a fork:
+
+1. Fork the repository on GitHub and clone your fork.
+2. Create a branch: `git checkout -b my-change`.
+3. Make the change, add tests, and run the checks below.
+4. Push the branch to your fork and open a pull request against `main`.
+
+For a larger change or a new write tool, open an issue first. CI on a pull request from a fork
+may wait for the maintainer's approval before it runs.
+
+Never include real portfolio data in a commit, issue, or pull request. Use the demo portfolio
+to reproduce a problem.
+
 ## Setup and tests
 
 ```bash
