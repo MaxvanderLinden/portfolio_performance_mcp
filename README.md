@@ -27,7 +27,7 @@ allocations are the same numbers the app shows.
 
 ## Requirements
 
-- **Portfolio Performance** installed (tested with 0.87). Its core jar and its bundled Java
+- **Portfolio Performance** installed (tested with 0.87 and 0.90). Its core jar and its bundled Java
   runtime are used directly, so no separate Java install is needed.
 - **Python 3.11+**, built for the **same CPU architecture** as Portfolio Performance (an Intel
   Python cannot load an Apple Silicon Java runtime, and vice versa).

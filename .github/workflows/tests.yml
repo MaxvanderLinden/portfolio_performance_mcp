@@ -37,10 +37,19 @@ jobs:
       - run: shellcheck scripts/*.sh
 
   integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pp: "0.87.0"
+            sha256: 1c280c73cc3bad3daf90cd4f825b11f02680393aa97bf28c660f74bc2f91e792
+          - pp: "0.90.0"
+            sha256: 129e22a16124e25c1f92318692ec8cbc9d310d00f59327378801ccb018baf6da
+    name: integration (PP ${{ matrix.pp }})
     runs-on: ubuntu-latest
     env:
-      PP_VERSION: "0.87.0"
-      PP_SHA256: 1c280c73cc3bad3daf90cd4f825b11f02680393aa97bf28c660f74bc2f91e792
+      PP_VERSION: ${{ matrix.pp }}
+      PP_SHA256: ${{ matrix.sha256 }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
