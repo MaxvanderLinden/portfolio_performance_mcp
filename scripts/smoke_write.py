@@ -5,7 +5,7 @@
 Never touches your own replica or staging folder: the demo fixture is copied to a temporary
 folder, and PP_FILE / PP_STAGED_DIR are passed to the server explicitly. (MCP clients start
 servers with a filtered environment, so variables exported in your shell would NOT reach it,
-and the server would fall back to ~/pp-mcp. That is why this does not use `fastmcp call`.)
+and the server would fall back to ~/pp-engine-mcp. That is why this does not use `fastmcp call`.)
 """
 
 from __future__ import annotations

@@ -17,8 +17,8 @@ The strongest control costs nothing: point `PP_FILE` at a **read-only replica**,
 
 ```bash
 # refresh-replica.sh — run by launchd, or by hand before a session
-cp "$PP_LIVE_FILE" ~/pp-mcp/replica/portfolio.xml
-chmod 444 ~/pp-mcp/replica/portfolio.xml
+cp "$PP_LIVE_FILE" ~/pp-engine-mcp/replica/portfolio.xml
+chmod 444 ~/pp-engine-mcp/replica/portfolio.xml
 ```
 
 A bug, a bad tool call or a confused model cannot damage a file whose path isn't in the config.
@@ -35,7 +35,7 @@ Ship it as **two servers from one package**:
 
 | server | entry point | registered | tools |
 | --- | --- | --- | --- |
-| `pp-engine-mcp` (aliases `pp-mcp`, `pp-read`) | `pp_engine_mcp.server:main` → `read_only()` | always | read + analytics, write module never imported |
+| `pp-engine-mcp` (alias `pp-read`) | `pp_engine_mcp.server:main` → `read_only()` | always | read + analytics, write module never imported |
 | `pp-write` | `pp_engine_mcp.server:main_write` → `read_write()` | only when you're actively editing | adds the additive tools |
 
 Both are implemented (`pyproject.toml`). Layer 3 lives in

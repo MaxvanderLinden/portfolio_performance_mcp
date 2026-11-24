@@ -33,8 +33,7 @@ Issues = "https://github.com/MaxvanderLinden/pp-engine-mcp/issues"
 
 [project.scripts]
 pp-engine-mcp = "pp_engine_mcp.server:main"
-# Earlier names, kept so existing registrations keep working.
-pp-mcp = "pp_engine_mcp.server:main"
+# Alias, kept so existing registrations keep working.
 pp-read = "pp_engine_mcp.server:main"
 pp-write = "pp_engine_mcp.server:main_write"  # staged writes; register deliberately, see SAFETY.md
 

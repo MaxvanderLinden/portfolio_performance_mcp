@@ -9,7 +9,7 @@
 set -euo pipefail
 
 LIVE="${PP_LIVE_FILE:?set PP_LIVE_FILE to your live Portfolio Performance .xml file}"
-REPLICA="${PP_FILE:-$HOME/pp-mcp/replica/portfolio.xml}"
+REPLICA="${PP_FILE:-$HOME/pp-engine-mcp/replica/portfolio.xml}"
 
 # BSD (macOS) and GNU (Linux) stat take different flags.
 if [ "$(uname)" = "Darwin" ]; then

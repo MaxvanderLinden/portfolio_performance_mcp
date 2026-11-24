@@ -16,9 +16,6 @@ The default server never writes anything. A separate, optional server can
 It loads your file with Portfolio Performance's own Java classes, so returns, IRR, cost basis and
 allocations are the same numbers the app shows.
 
-> Formerly `pp-mcp`. The old commands `pp-mcp` and `pp-read` still work, and the default data folder is
-> still `~/pp-mcp`. Not related to [Nokke32/pp-mcp](https://github.com/Nokke32/pp-mcp).
-
 > Unofficial project, not affiliated with Portfolio Performance. Not financial advice.
 
 ## How your data is handled
@@ -54,7 +51,7 @@ python3 -m venv .venv
 PP_LIVE_FILE="/path/to/your/portfolio.xml" ./scripts/refresh-replica.sh
 ```
 
-This copies your file to `~/pp-mcp/replica/portfolio.xml` and makes the copy read-only. Re-run it
+This copies your file to `~/pp-engine-mcp/replica/portfolio.xml` and makes the copy read-only. Re-run it
 after saving in the app to pick up your changes; the server reloads the replica automatically,
 no restart needed. (On Windows, copy the file yourself and mark the copy read-only.)
 
@@ -91,12 +88,12 @@ Add an `"env": {...}` block to that entry if you need any of the settings below.
 
 | variable | default | meaning |
 | --- | --- | --- |
-| `PP_FILE` | `~/pp-mcp/replica/portfolio.xml` | the replica the server reads |
+| `PP_FILE` | `~/pp-engine-mcp/replica/portfolio.xml` | the replica the server reads |
 | `PP_APP_PATH` | macOS `/Applications/PortfolioPerformance.app`, Linux `/opt/portfolio`, Windows `%ProgramFiles%\PortfolioPerformance` | the Portfolio Performance install |
 | `JAVA_HOME` | unset | a Java 21+ runtime, used only if none is bundled with Portfolio Performance |
 | `PP_LIVE_FILE` | none (required) | your real file; read by `refresh-replica.sh` only |
 | `PP_ALLOW_WRITABLE_SOURCE` | unset | set to `1` to skip the read-only check (not recommended) |
-| `PP_STAGED_DIR` | `~/pp-mcp/staged` | where `pp-write` keeps staged changes; read by `promote-staged.sh` too |
+| `PP_STAGED_DIR` | `~/pp-engine-mcp/staged` | where `pp-write` keeps staged changes; read by `promote-staged.sh` too |
 
 The server **refuses to start on a writable `PP_FILE`**. That catches the dangerous mistake of
 pointing it at your real file instead of the replica.
@@ -132,7 +129,7 @@ so (`truncated`, `total_matching`), so narrow with date ranges rather than raisi
 
 A second server, `pp-write`, adds tools that **add** records (prices, transactions, …). It never
 touches your real file or the replica: every change goes into a staged copy in
-`~/pp-mcp/staged/` (`PP_STAGED_DIR`), checked by reloading it with Portfolio Performance's own
+`~/pp-engine-mcp/staged/` (`PP_STAGED_DIR`), checked by reloading it with Portfolio Performance's own
 classes. Once something is staged, its read tools show the staged copy.
 
 When you are happy with the changes, quit Portfolio Performance and promote them yourself:

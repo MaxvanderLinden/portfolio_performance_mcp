@@ -54,7 +54,7 @@ temporary copy of the demo portfolio:
 
 Do not smoke-test with `fastmcp call`: MCP clients start servers with a filtered
 environment, so `PP_FILE`/`PP_STAGED_DIR` exported in your shell do not reach the server and it
-falls back to your real `~/pp-mcp` replica.
+falls back to your real `~/pp-engine-mcp` replica.
 
 **Never commit a real portfolio file.** `.gitignore` excludes `*.xml` except the demo fixture.
 
