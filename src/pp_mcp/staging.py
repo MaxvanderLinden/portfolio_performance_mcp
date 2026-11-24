@@ -5,7 +5,7 @@ See SAFETY.md, layers 3 and 4. A write goes through `apply()`, which
 1. loads the staged copy (or the replica, for the first change of a session),
 2. runs the mutation against PP's own model and counts what it changed,
 3. saves to a temp file with PP's own `ClientFactory`, reloads that file, and checks that the
-   counters moved by exactly the declared delta and that nothing decreased,
+   counters moved by exactly the declared delta and that no existing record changed,
 4. atomically replaces the staged copy and appends the change to a manifest.
 
 The manifest records the SHA-256 of the replica the session started from. Once the replica is
@@ -33,6 +33,7 @@ from typing import cast
 
 from typing_extensions import NotRequired, TypedDict
 
+from . import convert
 from . import jtypes as j
 from .bridge import ensure_thread_attached, start_jvm
 from .config import Config, ConfigError, load_config
@@ -180,6 +181,66 @@ def check_delta(before: Mapping[str, int], after: Mapping[str, int], expected: M
         )
 
 
+def records(client: j.Client) -> Counter[tuple[object, ...]]:
+    """Every existing record with its contents, as a multiset. Counters alone would miss a change
+    that edits a record in place; comparing these does not."""
+    found: Counter[tuple[object, ...]] = Counter()
+
+    def add_transactions(owner: j.TransactionOwner, transactions: j.JIterable[j.Transaction]) -> None:
+        for t in transactions:
+            security, cross = t.getSecurity(), t.getCrossEntry()
+            units = sorted(
+                (str(u.getType().name()), str(u.getAmount()), str(u.getForex()), str(u.getExchangeRate()))
+                for u in t.getUnits().toList()
+            )
+            found[(
+                "transaction", str(owner.getUUID()), str(t.getUUID()), str(t.getType().name()),
+                str(t.getDateTime()), int(t.getAmount()), str(t.getMonetaryAmount().getCurrencyCode()),
+                int(t.getShares()), str(security.getUUID()) if security is not None else None,
+                str(cross.getCrossOwner(t).getUUID()) if cross is not None else None,
+                convert.text(t.getNote()), tuple(units),
+            )] += 1
+
+    for s in client.getSecurities():
+        key = str(s.getUUID())
+        found[(
+            "security", key, str(s.getName()), convert.text(s.getIsin()), convert.text(s.getTickerSymbol()),
+            convert.text(s.getWkn()), convert.text(s.getCurrencyCode()), convert.text(s.getFeed()),
+            convert.text(s.getNote()), bool(s.isRetired()),
+        )] += 1
+        for price in s.getPrices():
+            found[("price", key, str(price.getDate()), int(price.getValue()))] += 1
+    for account in client.getAccounts():
+        found[("account", str(account.getUUID()), str(account.getName()), str(account.getCurrencyCode()),
+               convert.text(account.getNote()))] += 1
+        add_transactions(account, account.getTransactions())
+    for portfolio in client.getPortfolios():
+        reference = portfolio.getReferenceAccount()
+        found[("portfolio", str(portfolio.getUUID()), str(portfolio.getName()),
+               str(reference.getUUID()) if reference is not None else None,
+               convert.text(portfolio.getNote()))] += 1
+        add_transactions(portfolio, portfolio.getTransactions())
+    for taxonomy in client.getTaxonomies():
+        scheme = str(taxonomy.getId())
+        found[("taxonomy", scheme, str(taxonomy.getName()))] += 1
+        for c in taxonomy.getAllClassifications():
+            parent = c.getParent()
+            found[("classification", scheme, str(c.getId()), str(c.getName()), int(c.getWeight()), int(c.getRank()),
+                   str(parent.getId()) if parent is not None else None)] += 1
+            for a in c.getAssignments():
+                found[("assignment", scheme, str(c.getId()), str(a.getInvestmentVehicle().getUUID()),
+                       int(a.getWeight()), int(a.getRank()))] += 1
+    return found
+
+
+def check_unchanged(before: Counter[tuple[object, ...]], after: Counter[tuple[object, ...]]) -> None:
+    """Raise if any record that existed before is missing or different now. Pure."""
+    lost = before - after
+    if lost:
+        kinds = ", ".join(f"{n} {kind}(s)" for kind, n in sorted(Counter(str(k[0]) for k in lost.elements()).items()))
+        raise StagingError(f"the change altered existing records ({kinds}); nothing was staged")
+
+
 # --- file helpers ----------------------------------------------------------------------------
 
 
@@ -275,19 +336,18 @@ def _verify_staged(
     if manifest is None:
         raise StagingError(
             f"{area.staged} exists without a manifest, so its origin is unknown. "
-            f"Delete it (and nothing else) to start over."
+            f"Use discard_staged to set it aside and start over."
         )
     if manifest["base_sha256"] != replica_sha:
         raise StagingError(
             "the replica was refreshed after these changes were staged, so they are based on an "
             "outdated file. Promote them first (scripts/promote-staged.sh, which will also refuse "
-            "if the live file changed), or delete the files in "
-            f"{area.directory} to start over."
+            "if the live file changed), or use discard_staged to set them aside and start over."
         )
     if hasher(area.staged) != manifest["staged_sha256"]:
         raise StagingError(
             f"{area.staged} was modified outside pp-write (opened and saved in the app?). "
-            f"Delete the files in {area.directory} to start over."
+            "Use discard_staged to set it aside and start over."
         )
 
 
@@ -355,7 +415,7 @@ def apply(
             manifest = None  # a stale manifest without a staged file describes nothing
 
         client = _load(base)
-        before = census(client)
+        before, existing = census(client), records(client)
         details = dict(mutate(client))
 
         tmp = area.tmp
@@ -365,6 +425,7 @@ def apply(
             reloaded = _load(tmp)  # what is on disk, not what is in memory
             after = census(reloaded)
             check_delta(before, after, expected)
+            check_unchanged(existing, records(reloaded))
             _check_consistency(reloaded, base)
             tmp.chmod(0o444)
             staged_sha = sha256(tmp)
@@ -422,7 +483,10 @@ def discard(area: StagingArea) -> DiscardResult:
         present = [p for p in (area.staged, area.manifest) if p.exists()]
         if not present:
             return {"discarded": False, "note": "nothing was staged"}
-        manifest = read_manifest(area) if area.manifest.exists() else None
+        try:
+            manifest = read_manifest(area)
+        except StagingError:
+            manifest = None  # a damaged manifest is set aside like any other
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         target = area.directory / "backups" / f"discarded-{stamp}"
         target.mkdir(parents=True)
@@ -441,9 +505,8 @@ def read_config(area: StagingArea) -> Config:
     is refused rather than shown as current."""
     if not area.staged.exists():
         return load_config()
-    manifest = read_manifest(area)
     try:
-        _verify_staged(area, manifest, _cached_sha(area.replica), hasher=_cached_sha)
+        _verify_staged(area, read_manifest(area), _cached_sha(area.replica), hasher=_cached_sha)
     except StagingError as exc:
         raise ConfigError(str(exc)) from exc
     return Config(source=area.staged, app_path=area.app_path)

@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from pp_mcp import staging
 from pp_mcp.config import Config, ConfigError
@@ -231,3 +232,67 @@ def test_a_change_pp_would_flag_is_not_staged(area):
         staging.apply(area, "orphan", {"portfolio_tx:BUY": 1}, orphan_buy)
     assert not area.staged.exists()
     assert not list(area.directory.glob(".*.tmp"))
+
+
+# --- recovering ------------------------------------------------------------------------------
+
+
+def _start_write_server(area, monkeypatch):
+    from pp_mcp import server
+    from pp_mcp.bridge import set_config_provider
+
+    monkeypatch.setenv("PP_FILE", str(area.replica))
+    monkeypatch.setenv("PP_STAGED_DIR", str(area.directory))
+    monkeypatch.setattr("fastmcp.FastMCP.run", lambda self: None)
+    try:
+        server.main_write()
+    finally:
+        set_config_provider(None)
+
+
+@pytest.mark.parametrize("damage", ["replica", "manifest", "no manifest"])
+def test_pp_write_starts_and_can_discard_unusable_staged_changes(area, monkeypatch, damage):
+    from pp_mcp import write_tools
+
+    staging.apply(area, "ok", {"prices": 1}, add_prices(1))
+    if damage == "replica":
+        area.replica.chmod(0o644)
+        area.replica.write_bytes(area.replica.read_bytes() + b"\n")
+        area.replica.chmod(0o444)
+    elif damage == "manifest":
+        area.manifest.write_text("{bad")
+    else:
+        area.manifest.unlink()
+
+    _start_write_server(area, monkeypatch)
+    with pytest.raises(ConfigError):
+        staging.read_config(area)
+    if damage == "manifest":
+        with pytest.raises(ToolError, match="cannot read"):
+            write_tools.get_staged_changes()
+
+    assert write_tools.discard_staged()["discarded"] is True
+    assert staging.read_config(area).source == area.replica
+
+
+def test_editing_an_existing_record_is_not_staged(area):
+    """No counter moves, so only comparing contents catches it."""
+    def edit_in_place(client):
+        account = next(a for a in client.getAccounts() if a.getTransactions().size())
+        account.getTransactions().get(0).setAmount(123)
+        return {}
+
+    with pytest.raises(StagingError, match=r"altered existing records \(1 transaction"):
+        staging.apply(area, "sneaky edit", {}, edit_in_place)
+    assert not area.staged.exists()
+
+
+def test_editing_alongside_a_declared_addition_is_not_staged(area):
+    add = add_prices(1)
+
+    def add_and_rename(client):
+        list(client.getAccounts())[0].setName("Renamed")
+        return add(client)
+
+    with pytest.raises(StagingError, match="altered existing records"):
+        staging.apply(area, "sneaky rename", {"prices": 1}, add_and_rename)

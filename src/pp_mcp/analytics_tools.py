@@ -11,14 +11,16 @@ import datetime as dt
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TypeVar
 
+import jpype
 from fastmcp.exceptions import ToolError
 
 from . import convert
 from . import jtypes as j
 from .bridge import ClientHandle, get_client
 from .jsontypes import JsonObject
-from .read_tools import parse_date, resolve_named, resolve_security
+from .read_tools import capped, check_order, parse_date, resolve_owner, resolve_security
 
 MAX_SERIES_POINTS = 400
 
@@ -33,6 +35,14 @@ PERIOD_HELP = (
     "(2025), an explicit range (2024-01-01..2024-12-31), or a Portfolio Performance code "
     "(L1Y0 = last year, D30 = last 30 days, T30 = last 30 trading days, S2020-01-01 = since)."
 )
+
+ToolT = TypeVar("ToolT", bound=Callable[..., JsonObject])
+
+
+def _with_period_help(tool: ToolT) -> ToolT:
+    """Fill {PERIOD_HELP} in a tool's docstring, which is the description MCP clients see."""
+    tool.__doc__ = (tool.__doc__ or "").replace("{PERIOD_HELP}", PERIOD_HELP)
+    return tool
 
 
 def _earliest_transaction(client: j.Client) -> dt.date:
@@ -53,9 +63,9 @@ def _to_code(client: j.Client, period: str) -> str:
         return f"Y{text}"
     if ".." in text:
         start, _, end = text.partition("..")
-        parse_date(start, "period start")
-        parse_date(end, "period end")
-        return f"F{start}_{end}"
+        first, last = parse_date(start, "period start"), parse_date(end, "period end")
+        check_order(first, last)
+        return f"F{first}_{last}"
     return period.strip()
 
 
@@ -63,7 +73,7 @@ def _interval(handle: ClientHandle, period: str) -> tuple[j.Interval, str]:
     code = _to_code(handle.client, period)
     try:
         return j.reporting_period().from_(code).toInterval(j.local_date().now()), code
-    except Exception as exc:  # noqa: BLE001 - Java throws IOException for an unparsable code
+    except jpype.JException as exc:  # e.g. IOException for an unparsable code
         raise ToolError(f"could not read period {period!r} (as code {code!r}). {PERIOD_HELP}") from exc
 
 
@@ -91,11 +101,11 @@ def _index(
     if scope == "client":
         index, label = performance_index.forClient(client, converter, interval, warnings), "whole portfolio"
     elif scope == "portfolio":
-        portfolio = resolve_named(list(client.getPortfolios()), _require(name, scope), "portfolio")
+        portfolio = resolve_owner(list(client.getPortfolios()), _require(name, scope), "portfolio")
         index = performance_index.forPortfolio(client, converter, portfolio, interval, warnings)
         label = str(portfolio.getName())
     elif scope == "account":
-        account = resolve_named(list(client.getAccounts()), _require(name, scope), "account")
+        account = resolve_owner(list(client.getAccounts()), _require(name, scope), "account")
         index = performance_index.forAccount(client, converter, account, interval, warnings)
         label = str(account.getName())
     elif scope == "security":
@@ -142,11 +152,12 @@ def _resolve_classification(client: j.Client, query: str) -> j.Classification:
 # --- tools -----------------------------------------------------------------------------------
 
 
+@_with_period_help
 def get_performance(period: str = "1Y", scope: str = "client", name: str | None = None) -> JsonObject:
     """Time-weighted return (TTWROR), IRR, drawdown and volatility for a reporting period.
 
     Args:
-        period: reporting period. Use an alias (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 10Y, YTD, MTD, QTD, WTD, MAX), a calendar year (2025), an explicit range (2024-01-01..2024-12-31), or a Portfolio Performance code (L1Y0 = last year, D30 = last 30 days, T30 = last 30 trading days, S2020-01-01 = since).
+        period: reporting period. {PERIOD_HELP}
         scope: client, portfolio, account, security or classification.
         name: which portfolio/account/security/classification, when scope is not client.
     """
@@ -158,7 +169,7 @@ def get_performance(period: str = "1Y", scope: str = "client", name: str | None 
     drawdown, volatility = index.getDrawdown(), index.getVolatility()
 
     return {
-        "scope": scope.lower(),
+        "scope": scope.strip().lower(),
         "of": label,
         "period": {"requested": period, "code": code, **_interval_dates(interval)},
         "ttwror": _percent(index.getFinalAccumulatedPercentage()),
@@ -176,6 +187,7 @@ def get_performance(period: str = "1Y", scope: str = "client", name: str | None 
     }
 
 
+@_with_period_help
 def get_performance_snapshot(period: str = "1Y") -> JsonObject:
     """Where the change in value came from: capital gains, earnings, fees, taxes, transfers.
 
@@ -185,7 +197,7 @@ def get_performance_snapshot(period: str = "1Y") -> JsonObject:
     INITIAL_VALUE minus TRANSFERS.
 
     Args:
-        period: reporting period. Use an alias (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 10Y, YTD, MTD, QTD, WTD, MAX), a calendar year (2025), an explicit range (2024-01-01..2024-12-31), or a Portfolio Performance code (L1Y0 = last year, D30 = last 30 days, T30 = last 30 trading days, S2020-01-01 = since).
+        period: reporting period. {PERIOD_HELP}
     """
     handle = get_client()
     interval, code = _interval(handle, period)
@@ -230,6 +242,7 @@ def get_performance_snapshot(period: str = "1Y") -> JsonObject:
     }
 
 
+@_with_period_help
 def get_security_performance(
     period: str = "1Y",
     cost_method: str = "FIFO",
@@ -238,7 +251,7 @@ def get_security_performance(
     """Per-security returns over a period: IRR, TTWROR, capital gains, dividends, fees, taxes.
 
     Args:
-        period: reporting period. Use an alias (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 10Y, YTD, MTD, QTD, WTD, MAX), a calendar year (2025), an explicit range (2024-01-01..2024-12-31), or a Portfolio Performance code (L1Y0 = last year, D30 = last 30 days, T30 = last 30 trading days, S2020-01-01 = since).
+        period: reporting period. {PERIOD_HELP}
         cost_method: FIFO or MOVING_AVERAGE, as in Portfolio Performance's settings.
         include_closed: also report securities no longer held at the end of the period.
     """
@@ -284,6 +297,7 @@ def get_security_performance(
     }
 
 
+@_with_period_help
 def get_dividends(
     period: str = "MAX",
     security: str | None = None,
@@ -295,7 +309,7 @@ def get_dividends(
     Portfolio Performance does in its own dividend views.
 
     Args:
-        period: reporting period. Use an alias (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 10Y, YTD, MTD, QTD, WTD, MAX), a calendar year (2025), an explicit range (2024-01-01..2024-12-31), or a Portfolio Performance code (L1Y0 = last year, D30 = last 30 days, T30 = last 30 trading days, S2020-01-01 = since).
+        period: reporting period. {PERIOD_HELP}
         security: limit to one security (UUID, ISIN, ticker or name fragment).
         by: 'year' or 'security'.
     """
@@ -370,6 +384,7 @@ def get_dividends(
     }
 
 
+@_with_period_help
 def get_performance_series(
     period: str = "1Y",
     scope: str = "client",
@@ -379,7 +394,7 @@ def get_performance_series(
     """The TTWROR curve and portfolio value over time, sampled to keep responses small.
 
     Args:
-        period: reporting period. Use an alias (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 10Y, YTD, MTD, QTD, WTD, MAX), a calendar year (2025), an explicit range (2024-01-01..2024-12-31), or a Portfolio Performance code (L1Y0 = last year, D30 = last 30 days, T30 = last 30 trading days, S2020-01-01 = since).
+        period: reporting period. {PERIOD_HELP}
         scope: client, portfolio, account, security or classification.
         name: which one, when scope is not client.
         sampling: daily, weekly or monthly (the default).
@@ -405,18 +420,17 @@ def get_performance_series(
         elif sampling == "weekly" and day.weekday() == 4:
             keep.append(position)
 
-    truncated = len(keep) > MAX_SERIES_POINTS
-    if truncated:
-        keep = keep[-MAX_SERIES_POINTS:]
+    meta = capped(keep, MAX_SERIES_POINTS, "most recent")
+    keep = keep[-MAX_SERIES_POINTS:]
 
     return {
-        "scope": scope.lower(),
+        "scope": scope.strip().lower(),
         "of": label,
         "period": {"requested": period, "code": code, **_interval_dates(interval)},
         "sampling": sampling,
         "points": len(keep),
         "available_points": len(dates),
-        "truncated": truncated,
+        **meta,
         "warnings": warnings,
         "series": [
             {

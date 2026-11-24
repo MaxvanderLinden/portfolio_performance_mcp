@@ -63,7 +63,12 @@ def _amounts(
         gross = booked - fees - taxes if adds_shares else booked + fees + taxes
         forex = w.round_cents(Decimal(gross) / AMOUNT_FACTOR / rate) if rate is not None else None
     if gross <= 0:
-        raise ToolError("fees and taxes are as large as the total; check the amounts")
+        raise ToolError(
+            "shares x price rounds to zero; check the amounts" if price is not None
+            else "fees and taxes are as large as the total; check the amounts"
+        )
+    if forex is not None and forex <= 0:
+        raise ToolError("the value in the security's currency rounds to zero; check exchange_rate")
     if booked <= 0:
         raise ToolError("fees and taxes exceed the gross value; check the amounts")
     return _Amounts(total=booked, gross=gross, forex=forex)

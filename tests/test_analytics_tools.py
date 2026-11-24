@@ -139,3 +139,23 @@ def test_series_sampling_is_validated():
     assert at.get_performance_series("1Y", sampling="daily")["points"] > 300
     with pytest.raises(ToolError, match="sampling"):
         at.get_performance_series("1Y", sampling="hourly")
+
+
+def test_reversed_range_is_an_error(handle):
+    with pytest.raises(ToolError, match="is after"):
+        at.get_performance("2025-12-31..2025-01-01")
+    spaced = at.get_performance("2025-01-01 .. 2025-12-31")
+    assert spaced["period"]["code"] == "F2025-01-01_2025-12-31"
+
+
+def test_period_help_is_filled_in():
+    for tool in at.ANALYTICS_TOOLS:
+        assert "{PERIOD_HELP}" not in tool.__doc__
+        assert "L1Y0 = last year" in tool.__doc__
+
+
+def test_series_reports_truncation_like_other_tools(handle, monkeypatch):
+    monkeypatch.setattr("pp_mcp.analytics_tools.MAX_SERIES_POINTS", 5)
+    result = at.get_performance_series("1Y", sampling="daily")
+    assert result["truncated"] and result["returned"] == len(result["series"]) == 5
+    assert result["total_matching"] > 5

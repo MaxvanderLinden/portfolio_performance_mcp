@@ -50,3 +50,21 @@ def test_missing_app_names_the_variable(tmp_path):
     source.chmod(0o444)
     with pytest.raises(ConfigError, match="PP_APP_PATH"):
         load_config({"PP_FILE": str(source), "PP_APP_PATH": str(tmp_path / "missing.app")})
+
+
+def test_platforms_without_st_blocks(tmp_path, monkeypatch):
+    """Windows' stat result has no st_blocks."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    source = tmp_path / "portfolio.xml"
+    source.write_text("<client/>")
+    source.chmod(0o444)
+    env, real = _env(tmp_path, source), Path.stat
+
+    def windows_stat(self, **kwargs):
+        result = real(self, **kwargs)
+        return SimpleNamespace(st_mode=result.st_mode, st_size=result.st_size) if self == source else result
+
+    monkeypatch.setattr(Path, "stat", windows_stat)
+    assert load_config(env).source == source

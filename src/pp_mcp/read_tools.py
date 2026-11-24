@@ -27,6 +27,7 @@ MAX_PRICE_ROWS = 250
 MAX_TRANSACTION_ROWS = 100
 
 NamedT = TypeVar("NamedT", bound=j.Named)
+OwnerT = TypeVar("OwnerT", bound=j.Identified)
 
 TRADE_TYPES = {"BUY", "SELL"}
 
@@ -42,7 +43,7 @@ def parse_date(value: str | None, field: str) -> dt.date | None:
     if value is None:
         return None
     try:
-        return dt.date.fromisoformat(value)
+        return dt.date.fromisoformat(value.strip())
     except ValueError as exc:
         raise ToolError(f"{field} must be an ISO date like 2026-01-31, got {value!r}") from exc
 
@@ -57,6 +58,7 @@ SECURITY_KEYS: tuple[Callable[[j.Security], j.JString | None], ...] = (
     lambda s: s.getUUID(),
     lambda s: s.getIsin(),
     lambda s: s.getTickerSymbol(),
+    lambda s: s.getName(),
 )
 
 
@@ -71,10 +73,9 @@ def resolve_security(handle: ClientHandle, query: str) -> j.Security:
         exact = [s for s in securities if (convert.text(key(s)) or "").casefold() == needle]
         if len(exact) == 1:
             return exact[0]
-
-    by_name = [s for s in securities if str(s.getName()).casefold() == needle]
-    if len(by_name) == 1:
-        return by_name[0]
+        if len(exact) > 1:
+            names = ", ".join(sorted(f"{s.getName()} (uuid {s.getUUID()})" for s in exact))
+            raise ToolError(f"{query!r} matches several securities: {names}")
 
     partial = [s for s in securities if needle in str(s.getName()).casefold()]
     if len(partial) == 1:
@@ -88,19 +89,35 @@ def resolve_security(handle: ClientHandle, query: str) -> j.Security:
     )
 
 
-def resolve_named(items: list[NamedT], query: str, kind: str) -> NamedT:
+def resolve_owner(items: list[OwnerT], query: str, kind: str) -> OwnerT:
+    """An account or portfolio by UUID, name or (part of a) name."""
+    return _resolve(items, query, kind, lambda i: str(i.getUUID()))
+
+
+def resolve_taxonomy(client: j.Client, query: str) -> j.Taxonomy:
+    """A taxonomy by id, name or (part of a) name."""
+    return _resolve(list(client.getTaxonomies()), query, "taxonomy", lambda t: str(t.getId()))
+
+
+def _resolve(items: list[NamedT], query: str, kind: str, identifier: Callable[[NamedT], str]) -> NamedT:
     needle = query.strip().casefold()
-    exact = [i for i in items if str(i.getName()).casefold() == needle]
-    if len(exact) == 1:
-        return exact[0]
-    partial = [i for i in items if needle in str(i.getName()).casefold()]
-    if len(partial) == 1:
-        return partial[0]
+    if not needle:
+        raise ToolError(f"{kind} must not be empty")
+    found = [i for i in items if identifier(i).casefold() == needle]
+    found = found or [i for i in items if str(i.getName()).casefold() == needle]
+    found = found or [i for i in items if needle in str(i.getName()).casefold()]
+    if len(found) == 1:
+        return found[0]
     names = ", ".join(sorted(str(i.getName()) for i in items))
     raise ToolError(f"no unique {kind} matches {query!r}. Available: {names}")
 
 
-def _capped(rows: Sequence[object], limit: int, order: str) -> JsonObject:
+def check_order(start: dt.date | None, end: dt.date | None) -> None:
+    if start and end and start > end:
+        raise ToolError(f"start {start} is after end {end}")
+
+
+def capped(rows: Sequence[object], limit: int, order: str) -> JsonObject:
     total = len(rows)
     return {
         "total_matching": total,
@@ -203,8 +220,8 @@ def get_transactions(
 
     Args:
         security: UUID, ISIN, ticker or name fragment.
-        account: cash account name (or fragment).
-        portfolio: securities account name (or fragment).
+        account: cash account UUID or name (or fragment).
+        portfolio: securities account UUID or name (or fragment).
         type: stable enum name such as BUY, SELL, DIVIDENDS, DEPOSIT, FEES, TAXES.
         start: ISO date, inclusive.
         end: ISO date, inclusive.
@@ -215,6 +232,7 @@ def get_transactions(
     wanted_security = resolve_security(handle, security) if security else None
     from_date = parse_date(start, "start")
     to_date = parse_date(end, "end")
+    check_order(from_date, to_date)
     wanted_type = type.strip().upper() if type else None
     limit = max(1, min(int(limit), 1000))
 
@@ -243,8 +261,8 @@ def get_transactions(
 
     accounts = list(handle.client.getAccounts())
     portfolios = list(handle.client.getPortfolios())
-    wanted_account = resolve_named(accounts, account, "account") if account else None
-    wanted_portfolio = resolve_named(portfolios, portfolio, "portfolio") if portfolio else None
+    wanted_account = resolve_owner(accounts, account, "account") if account else None
+    wanted_portfolio = resolve_owner(portfolios, portfolio, "portfolio") if portfolio else None
 
     # Cash legs. A trade's cash leg is skipped here and reported with its securities leg below.
     if wanted_portfolio is None:
@@ -266,7 +284,7 @@ def get_transactions(
             collect(java_transaction, str(cash.getName()) if cash else None, name)
 
     rows.sort(key=lambda row: row.datetime, reverse=True)
-    meta = _capped(rows, limit, "most recent")
+    meta = capped(rows, limit, "most recent")
     return {**meta, "transactions": convert.jsonable(rows[:limit])}
 
 
@@ -296,6 +314,7 @@ def get_prices(
     java_security = resolve_security(handle, security)
     from_date = parse_date(start, "start")
     to_date = parse_date(end, "end")
+    check_order(from_date, to_date)
     limit = max(1, min(int(limit), 2000))
 
     # getPrices() holds history only; the latest quote lives beside it, as in the app's chart.
@@ -318,7 +337,7 @@ def get_prices(
         }
 
     ordered = list(reversed(prices))
-    meta = _capped(ordered, limit, "most recent")
+    meta = capped(ordered, limit, "most recent")
     return {
         "security": str(java_security.getName()),
         "currency": convert.text(java_security.getCurrencyCode()),
@@ -361,7 +380,7 @@ def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> Js
     """Break current assets down by one taxonomy, following PP's assignment weights.
 
     Args:
-        taxonomy: taxonomy id or name (fragment).
+        taxonomy: taxonomy id or name (or fragment).
         date: value the portfolio on this ISO date instead of today.
         depth: how many levels of the classification tree to return.
 
@@ -372,15 +391,7 @@ def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> Js
     on = parse_date(date, "date")
     snapshot = _snapshot(handle, on)
 
-    taxonomies = list(handle.client.getTaxonomies())
-    needle = taxonomy.strip().casefold()
-    matches = [t for t in taxonomies if str(t.getId()).casefold() == needle] or [
-        t for t in taxonomies if needle in str(t.getName()).casefold()
-    ]
-    if len(matches) != 1:
-        names = ", ".join(str(t.getName()) for t in taxonomies)
-        raise ToolError(f"no unique taxonomy matches {taxonomy!r}. Available: {names}")
-    chosen = matches[0]
+    chosen = resolve_taxonomy(handle.client, taxonomy)
 
     by_vehicle = snapshot.getPositionsByVehicle()
     hundred_percent = int(j.classification().ONE_HUNDRED_PERCENT)
@@ -426,7 +437,10 @@ def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> Js
         for child in root.children:
             if child.total:
                 bucket = render(child, 1)
-                bucket["share_of_total"] = round(round(float(child.total), 2) / float(total_assets.amount), 6)
+                bucket["share_of_total"] = (
+                    round(round(float(child.total), 2) / float(total_assets.amount), 6)
+                    if total_assets.amount else None
+                )
                 buckets.append(bucket)
 
     return {

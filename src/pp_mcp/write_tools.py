@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Callable, Mapping
-from decimal import Decimal
 from typing import cast
 
 from fastmcp.exceptions import ToolError
@@ -23,7 +22,7 @@ from typing_extensions import TypedDict
 from . import classification_tools, convert, staging, trade_tools
 from . import jtypes as j
 from . import write_common as w
-from .bridge import AMOUNT_FACTOR, QUOTE_FACTOR
+from .bridge import QUOTE_FACTOR
 from .jsontypes import JsonObject
 
 MAX_PRICE_ROWS = 1000
@@ -97,6 +96,8 @@ def add_prices(security: str, prices: list[PriceRow]) -> staging.ApplyResult:
             "added": len(rows),
             "first": ordered[0].isoformat(),
             "last": ordered[-1].isoformat(),
+            "lowest": convert.jsonable(convert.quote(min(rows.values()))),
+            "highest": convert.jsonable(convert.quote(max(rows.values()))),
         }
 
     return w.staged(f"add {len(rows)} price(s) to {security}", {"prices": len(rows)}, mutate)
@@ -133,47 +134,39 @@ def record_cash(
     if kind not in CASH_TYPES:
         raise ToolError(f"type must be one of {', '.join(CASH_TYPES)}; got {type!r}")
     when = w.past_date(date, "date")
-    cents = w.fixed_point(amount, AMOUNT_FACTOR, "amount", 2)
-    text = (note or "").strip() or None
+    cents = w.cents(amount, "amount")
+    text = w.note_text(note)
     if security is not None and kind not in SECURITY_CASH_TYPES:
         raise ToolError(f"a {kind} cannot be linked to a security")
     if tax is not None and kind != "INTEREST":
         raise ToolError("tax can only be given for INTEREST (as tax withheld)")
-    tax_cents = w.fixed_point(tax, AMOUNT_FACTOR, "tax", 2) if tax is not None else None
+    tax_cents = w.cents(tax, "tax") if tax is not None else None
 
     def mutate(client: j.Client) -> JsonObject:
         target = w.exact_account(client, account)
         linked = w.exact_security(client, security) if security is not None else None
-        if not allow_duplicate:
-            for existing in target.getTransactions():
-                if (
-                    str(existing.getType().name()) == kind
-                    and int(existing.getAmount()) == cents
-                    and convert.date_of(existing.getDateTime().toLocalDate()) == when
-                ):
-                    raise ToolError(
-                        f"{target.getName()} already has a {kind} of {Decimal(cents) / AMOUNT_FACTOR} "
-                        f"on {when} (uuid {existing.getUUID()}). Nothing was staged; pass "
-                        "allow_duplicate=true if this really is a second one."
-                    )
+        w.refuse_duplicate(
+            (t for t in target.getTransactions()
+             if str(t.getType().name()) == kind and int(t.getAmount()) == cents and w.day_of(t) == when),
+            f"a {kind} of {w.money_text(cents, target.getCurrencyCode())} in {target.getName()} on {when}",
+            allow_duplicate,
+        )
 
         transaction = j.account_transaction()()
         transaction.setType(j.account_transaction_type().valueOf(kind))
-        transaction.setDateTime(j.local_date_time().of(when.year, when.month, when.day, 0, 0))
+        transaction.setDateTime(w.java_datetime(when))
         transaction.setCurrencyCode(target.getCurrencyCode())
         transaction.setAmount(cents)
         if linked is not None:
             transaction.setSecurity(linked)
         if tax_cents is not None:
-            withheld = j.money().of(target.getCurrencyCode(), tax_cents)
-            transaction.addUnit(j.unit()(j.unit_type().valueOf("TAX"), withheld))
+            transaction.addUnit(w.unit("TAX", tax_cents, target.getCurrencyCode()))
         if text:
             transaction.setNote(text)
         transaction.setUpdatedAt(j.instant().now())
         target.addTransaction(transaction)
 
-        info = convert.transaction(transaction, account_name=str(target.getName()), include_notes=True)
-        return {"transaction": convert.jsonable(info)}
+        return {"transaction": w.describe(transaction, account=target)}
 
     return w.staged(f"record {kind} on {account} for {date}", {f"account_tx:{kind}": 1}, mutate)
 
@@ -199,7 +192,10 @@ def get_staged_changes() -> staging.Status:
     `up_to_date_with_replica` false means the replica was refreshed after staging; `unmodified`
     false means the staged file was edited outside pp-write. Either one blocks promoting.
     """
-    return staging.status(w.area())
+    try:
+        return staging.status(w.area())
+    except staging.StagingError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 WRITE_TOOLS: list[Callable[..., object]] = [

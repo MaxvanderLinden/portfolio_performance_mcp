@@ -24,6 +24,12 @@ fi
 
 [ -f "$LIVE" ] || { echo "live file not found: $LIVE" >&2; exit 1; }
 
+# The replica is replaced below, so it must never be the live file (also not via a link).
+if [ "$LIVE" -ef "$REPLICA" ]; then
+  echo "PP_FILE and PP_LIVE_FILE are the same file ($LIVE); PP_FILE must be a separate copy." >&2
+  exit 1
+fi
+
 # iCloud may keep the file as a dataless placeholder; materialise it before copying.
 if [ "$(uname)" = "Darwin" ] && [ "$(blocks "$LIVE")" -eq 0 ]; then
   echo "materialising from iCloud..."
@@ -37,14 +43,18 @@ fi
 mkdir -p "$(dirname "$REPLICA")"
 
 # Portfolio Performance rewrites the whole file on save, so a copy taken mid-save can be torn.
-# Copy, then confirm the source did not change while we were reading it.
+# Copy to a temporary file, confirm the source did not change while we were reading it, and only
+# then swap it in: readers never see a partial replica, and a failed refresh keeps the old one.
+tmp="$(dirname "$REPLICA")/.$(basename "$REPLICA").refresh.$$"
+trap 'rm -f "$tmp"' EXIT
 for attempt in 1 2 3; do
   before="$(identity "$LIVE")"
-  rm -f "$REPLICA"
-  cp "$LIVE" "$REPLICA"
+  rm -f "$tmp"
+  cp "$LIVE" "$tmp"
   after="$(identity "$LIVE")"
   if [ "$before" = "$after" ]; then
-    chmod 444 "$REPLICA"
+    chmod 444 "$tmp"
+    mv -f "$tmp" "$REPLICA"
     echo "replica: $REPLICA ($(size "$REPLICA") bytes)"
     if pgrep -f PortfolioPerformance >/dev/null 2>&1; then
       echo "note: Portfolio Performance is running; unsaved changes in the app are not in this replica."
