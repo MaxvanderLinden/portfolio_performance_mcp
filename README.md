@@ -138,6 +138,10 @@ When you are happy with the changes, quit Portfolio Performance and promote them
 PP_LIVE_FILE="/path/to/your/portfolio.xml" ./scripts/promote-staged.sh
 ```
 
+Every write also returns this command with your staging folder filled in, so you can copy it from
+the conversation and replace only the path of your file. Claude is told to pass it on, not to run
+it, and the script needs your answer at a terminal in any case.
+
 It shows every staged change with its amounts. It refuses if the app is running (or if it cannot
 tell), if your file changed since the replica was taken, or if anything changed while you were
 reviewing. It asks for confirmation at the terminal, backs up your file, and refreshes the
@@ -165,6 +169,30 @@ fragment, refuse future dates, and refuse a likely duplicate unless `allow_dupli
 change must also pass Portfolio Performance's own consistency checks (the ones the app runs when
 it opens a file) before it is staged. Existing records, weights included, are never changed.
 
+### Try it on the demo portfolio first
+
+Nothing here involves your own file. Make a demo "live" file and its replica:
+
+```bash
+mkdir -p ~/pp-demo && cp tests/fixtures/demo.xml ~/pp-demo/demo.xml
+PP_LIVE_FILE=~/pp-demo/demo.xml PP_FILE=~/pp-demo/replica/portfolio.xml ./scripts/refresh-replica.sh
+```
+
+Connect `pp-write` to it, then start a new Claude Code session in this folder:
+
+```bash
+claude mcp add pp-demo-write -e PP_FILE="$HOME/pp-demo/replica/portfolio.xml" -e PP_STAGED_DIR="$HOME/pp-demo/staged" -- "$PWD/.venv/bin/pp-write"
+```
+
+Ask it to use the `pp-demo-write` MCP tools, for example to buy 3 DWLD in Broker at 100. Then quit
+Portfolio Performance, promote, and open `~/pp-demo/demo.xml` in the app:
+
+```bash
+PP_LIVE_FILE=~/pp-demo/demo.xml PP_STAGED_DIR=~/pp-demo/staged ./scripts/promote-staged.sh
+```
+
+Afterwards, run `claude mcp remove pp-demo-write` and delete `~/pp-demo`.
+
 ## Troubleshooting
 
 | message | fix |
@@ -173,6 +201,8 @@ it opens a file) before it is staged. Existing records, weights included, are ne
 | `Replica … is writable` | `PP_FILE` points at your real file, or the copy lost its read-only flag; re-run `refresh-replica.sh` |
 | `Portfolio Performance not found at …` | set `PP_APP_PATH` to your install folder |
 | `No Java runtime found` / `Could not start the Java runtime` | usually a Python/Java architecture mismatch; use a Python built for the same architecture as Portfolio Performance, or set `JAVA_HOME` |
+| `the replica was refreshed after these changes were staged` | promote them if your file is unchanged since; otherwise ask for `discard_staged`, then stage them again |
+| `… was modified outside pp-write` | the staged copy was edited, e.g. saved in the app; ask for `discard_staged`, then stage again |
 | `… dataless iCloud placeholder` | the file is not downloaded yet; open it in Finder, or run the `brctl download` command shown |
 
 ## Development

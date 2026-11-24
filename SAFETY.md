@@ -49,17 +49,27 @@ Write tools produce a **proposed file plus a domain-level diff**, never touching
 
 ```
 record_buy(...) -> staged/portfolio.staged.xml
-  + BUY 12 IE00XXXXXXXX @ EUR 98,20 on 2026-09-04  (Broker / Broker cash)
-  fingerprint: transactions 120 -> 121, all other counters unchanged
+  record BUY of 12 IE00XXXXXXXX in Broker on 2026-09-04
+      changes: {'account_tx:BUY': 1, 'portfolio_tx:BUY': 1}
+      transaction:
+        shares: 12
+        amount: EUR 1178.4
 ```
 
 Before a change is staged, the saved copy is reloaded and must show exactly the declared change
-in its counters, must leave every existing record's contents unchanged, and must not raise any consistency issue (PP's own `Checker`, run on a throwaway
-copy because some checks repair in memory) that the file did not already have.
+in its counters, must leave every existing record's contents unchanged, and must not raise any
+consistency issue (PP's own `Checker`, run on a throwaway copy because some checks repair in
+memory) that the file did not already have.
 
-You review the diff, open the staged file in PP, and Save As if you agree. Full write capability,
-zero blast radius. Promoting a staged file to live should be a shell command **you** run, not a
-tool the model can call.
+You review the changes and promote them with `scripts/promote-staged.sh`: a shell command **you**
+run, not a tool the model can call. Each write returns that command with the staging folder filled
+in; the live file stays a placeholder, because the server never learns its path (Layer 1). The
+model is told not to run it, but that is only an instruction. What holds is that the script asks
+for confirmation at a terminal.
+
+Do not save over the staged file in PP: `pp-write` and the script refuse a staged copy they did
+not produce. Do not "Save As" it over your real file either, which skips the script's checks and
+its backup.
 
 ## Layer 4 — if you later write to the live file directly
 

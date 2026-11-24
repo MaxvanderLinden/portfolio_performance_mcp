@@ -65,7 +65,8 @@ falls back to your real `~/pp-engine-mcp` replica.
   loads either. Read [SAFETY.md](SAFETY.md) before adding a write tool.
 - **Every write goes through `staging.apply()`** with the counters it adds to, e.g.
   `{"account_tx:DEPOSIT": 1}`. It saves to a temp file, reloads it, and refuses unless exactly those
-  counters grew and every existing record is unchanged; then it replaces the staged copy and logs the change in `manifest.json`. Add only;
+  counters grew and every existing record is unchanged; then it replaces the staged copy and
+  logs the change in `manifest.json`. Add only;
   identify things exactly (UUID, ISIN, exact name), never by fragment.
 - **The JVM starts on the main thread**, in `read_only()`. FastMCP runs sync tools in worker
   threads and starting the JVM from one of those hangs; `get_client()` attaches each worker.
