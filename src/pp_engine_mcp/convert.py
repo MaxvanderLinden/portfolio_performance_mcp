@@ -204,6 +204,19 @@ def latest_price(value: j.LatestSecurityPrice | None) -> LatestPrice | None:
     )
 
 
+def newest_price(value: j.Security) -> LatestPrice | None:
+    """The latest quote, or the last historical price when there is no quote or it is older (a
+    security without a feed has a price history but no separate quote)."""
+    latest = latest_price(value.getLatest())
+    prices = value.getPrices()
+    if not prices.size():
+        return latest
+    last = price(prices.get(prices.size() - 1))
+    if latest is not None and latest.date >= last.date:
+        return latest
+    return LatestPrice(date=last.date, value=last.value, high=None, low=None, volume=None)
+
+
 def security(value: j.Security, *, include_notes: bool = False) -> SecurityInfo:
     prices = value.getPrices()
     return SecurityInfo(
@@ -217,7 +230,7 @@ def security(value: j.Security, *, include_notes: bool = False) -> SecurityInfo:
         retired=bool(value.isRetired()),
         price_count=prices.size(),
         first_price=date(prices.get(0).getDate()) if prices.size() else None,
-        latest=latest_price(value.getLatest()),
+        latest=newest_price(value),
         note=text(value.getNote()) if include_notes else None,
     )
 

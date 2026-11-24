@@ -13,6 +13,7 @@ import re
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 import jpype
@@ -235,6 +236,8 @@ def fingerprint(handle: ClientHandle) -> Fingerprint:
 
     snapshot = j.client_snapshot().create(client, handle.converter, j.local_date().now())
 
+    assets = snapshot.getMonetaryAssets()
+
     return Fingerprint(
         securities=len(securities),
         accounts=len(accounts),
@@ -243,7 +246,8 @@ def fingerprint(handle: ClientHandle) -> Fingerprint:
         transactions=sum(a.getTransactions().size() for a in accounts)
         + sum(p.getTransactions().size() for p in portfolios),
         prices=sum(s.getPrices().size() for s in securities),
-        total_assets=str(snapshot.getMonetaryAssets()),
+        # Not str(Money), which formats in the system's locale.
+        total_assets=f"{assets.getCurrencyCode()} {Decimal(int(assets.getAmount())) / AMOUNT_FACTOR:,.2f}",
     )
 
 

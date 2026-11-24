@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,3 +42,35 @@ def test_scaling_does_not_go_through_float():
 )
 def test_jsonable(value, expected):
     assert convert.jsonable(value) == expected
+
+
+def _java_security(history, latest):
+    """Stand-in for PP's Security; prices are (date, value) pairs, oldest first."""
+    def row(day, value):
+        return SimpleNamespace(
+            getDate=lambda: SimpleNamespace(
+                getYear=lambda: day.year, getMonthValue=lambda: day.month, getDayOfMonth=lambda: day.day),
+            getValue=lambda: value * 100_000_000, getHigh=lambda: 0, getLow=lambda: 0, getVolume=lambda: 0,
+        )
+
+    rows = [row(*p) for p in history]
+    return SimpleNamespace(
+        getPrices=lambda: SimpleNamespace(size=lambda: len(rows), get=lambda i: rows[i]),
+        getLatest=lambda: row(*latest) if latest else None,
+    )
+
+
+OLD, NEW = dt.date(2026, 1, 1), dt.date(2026, 2, 1)
+
+
+@pytest.mark.parametrize("history, latest, expected", [
+    ([(OLD, 1), (NEW, 2)], None, (NEW, 2)),  # history only
+    ([(OLD, 1)], (NEW, 3), (NEW, 3)),        # quote is newer
+    ([(NEW, 2)], (NEW, 3), (NEW, 3)),        # same day: the quote
+    ([(NEW, 2)], (OLD, 3), (NEW, 2)),        # stale quote
+    ([], (NEW, 3), (NEW, 3)),
+    ([], None, None),
+])
+def test_newest_price_falls_back_to_history(history, latest, expected):
+    found = convert.newest_price(_java_security(history, latest))
+    assert (found and (found.date, found.value)) == expected
