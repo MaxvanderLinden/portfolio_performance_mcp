@@ -1,4 +1,4 @@
-# pp-mcp
+# pp-engine-mcp
 
 An [MCP](https://modelcontextprotocol.io) server that gives Claude (or any MCP client)
 **read-only** access to your [Portfolio Performance](https://www.portfolio-performance.info)
@@ -15,6 +15,9 @@ The default server never writes anything. A separate, optional server can
 
 It loads your file with Portfolio Performance's own Java classes, so returns, IRR, cost basis and
 allocations are the same numbers the app shows.
+
+> Formerly `pp-mcp`. The old commands `pp-mcp` and `pp-read` still work, and the default data folder is
+> still `~/pp-mcp`. Not related to [Nokke32/pp-mcp](https://github.com/Nokke32/pp-mcp).
 
 > Unofficial project, not affiliated with Portfolio Performance. Not financial advice.
 
@@ -39,8 +42,8 @@ reports welcome.
 ## Install
 
 ```bash
-git clone https://github.com/MaxvanderLinden/portfolio_performance_mcp.git
-cd portfolio_performance_mcp
+git clone https://github.com/MaxvanderLinden/pp-engine-mcp.git
+cd pp-engine-mcp
 python3 -m venv .venv
 ./.venv/bin/pip install -e .
 ```
@@ -58,7 +61,7 @@ no restart needed. (On Windows, copy the file yourself and mark the copy read-on
 Check that it loads and that the totals match the app:
 
 ```bash
-./.venv/bin/python -m pp_mcp
+./.venv/bin/python -m pp_engine_mcp
 ```
 
 ## Connect it to Claude
@@ -66,7 +69,7 @@ Check that it loads and that the totals match the app:
 **Claude Code:**
 
 ```bash
-claude mcp add portfolio -- "$PWD/.venv/bin/pp-mcp"
+claude mcp add portfolio -- "$PWD/.venv/bin/pp-engine-mcp"
 ```
 
 **Claude Desktop** — add this to `claude_desktop_config.json` (Settings → Developer → Edit Config),
@@ -76,7 +79,7 @@ using the absolute path to your clone:
 {
   "mcpServers": {
     "portfolio": {
-      "command": "/absolute/path/to/portfolio_performance_mcp/.venv/bin/pp-mcp"
+      "command": "/absolute/path/to/pp-engine-mcp/.venv/bin/pp-engine-mcp"
     }
   }
 }

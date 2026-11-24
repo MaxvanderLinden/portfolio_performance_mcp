@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 from fastmcp.exceptions import ToolError
 
-from pp_mcp import staging
-from pp_mcp.config import Config, ConfigError
-from pp_mcp.staging import StagingError, check_delta
+from pp_engine_mcp import staging
+from pp_engine_mcp.config import Config, ConfigError
+from pp_engine_mcp.staging import StagingError, check_delta
 
 FIXTURE = Path(__file__).parent / "fixtures" / "demo.xml"
 ROOT = Path(__file__).resolve().parents[1]
@@ -238,8 +238,8 @@ def test_a_change_pp_would_flag_is_not_staged(area):
 
 
 def _start_write_server(area, monkeypatch):
-    from pp_mcp import server
-    from pp_mcp.bridge import set_config_provider
+    from pp_engine_mcp import server
+    from pp_engine_mcp.bridge import set_config_provider
 
     monkeypatch.setenv("PP_FILE", str(area.replica))
     monkeypatch.setenv("PP_STAGED_DIR", str(area.directory))
@@ -252,7 +252,7 @@ def _start_write_server(area, monkeypatch):
 
 @pytest.mark.parametrize("damage", ["replica", "manifest", "no manifest"])
 def test_pp_write_starts_and_can_discard_unusable_staged_changes(area, monkeypatch, damage):
-    from pp_mcp import write_tools
+    from pp_engine_mcp import write_tools
 
     staging.apply(area, "ok", {"prices": 1}, add_prices(1))
     if damage == "replica":

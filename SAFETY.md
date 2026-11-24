@@ -35,11 +35,11 @@ Ship it as **two servers from one package**:
 
 | server | entry point | registered | tools |
 | --- | --- | --- | --- |
-| `pp-mcp` (alias `pp-read`) | `pp_mcp.server:main` → `read_only()` | always | read + analytics, write module never imported |
-| `pp-write` | `pp_mcp.server:main_write` → `read_write()` | only when you're actively editing | adds the additive tools |
+| `pp-engine-mcp` (aliases `pp-mcp`, `pp-read`) | `pp_engine_mcp.server:main` → `read_only()` | always | read + analytics, write module never imported |
+| `pp-write` | `pp_engine_mcp.server:main_write` → `read_write()` | only when you're actively editing | adds the additive tools |
 
 Both are implemented (`pyproject.toml`). Layer 3 lives in
-`src/pp_mcp/staging.py` and `scripts/promote-staged.sh`; the Layer 4 checks (process, compare
+`src/pp_engine_mcp/staging.py` and `scripts/promote-staged.sh`; the Layer 4 checks (process, compare
 against the base hash, atomic replace, declared-delta guard) are applied at promote time and on
 every staged write respectively.
 
@@ -99,7 +99,7 @@ All four of these, together:
 ## Layer 6 — permissions in Claude Code
 
 Do not put write tools on an allowlist, and never run this project with permission prompts
-auto-accepted. Registering only `pp-mcp` by default means the write server has to be enabled
+auto-accepted. Registering only `pp-engine-mcp` by default means the write server has to be enabled
 deliberately, which is the moment you actually think about it.
 
 ## Layer 7 — treat file contents as data
@@ -118,7 +118,7 @@ writer of the real file, Claude Code's permission prompt, and backups on another
 
 ## Recommended starting configuration
 
-1. Read-only replica + `pp-mcp` only. Use it for a week; check its numbers against the app.
+1. Read-only replica + `pp-engine-mcp` only. Use it for a week; check its numbers against the app.
 2. Add `pp-write` in staging mode. Promote staged files by hand.
 3. Only consider direct live writes after the four Layer-4 controls are in place and tested — and
    even then, keep `add_prices` as the first and only live-writing tool for a while.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from pp_mcp.config import ConfigError, load_config
+from pp_engine_mcp.config import ConfigError, load_config
 
 
 def _env(tmp_path, source, **extra):

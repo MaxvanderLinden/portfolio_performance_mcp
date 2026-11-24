@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 from fastmcp.exceptions import ToolError
 
-from pp_mcp import classification_tools as ct
-from pp_mcp import read_tools, staging
-from pp_mcp.bridge import set_config_provider
+from pp_engine_mcp import classification_tools as ct
+from pp_engine_mcp import read_tools, staging
+from pp_engine_mcp.bridge import set_config_provider
 
 FIXTURE = Path(__file__).parent / "fixtures" / "demo.xml"
 

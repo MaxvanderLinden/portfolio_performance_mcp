@@ -27,8 +27,8 @@ import jpype
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from pp_mcp.bridge import AMOUNT_FACTOR, QUOTE_FACTOR, SHARE_FACTOR, find_classpath, find_libjvm  # noqa: E402
-from pp_mcp.config import DEFAULT_APP, Config  # noqa: E402
+from pp_engine_mcp.bridge import AMOUNT_FACTOR, QUOTE_FACTOR, SHARE_FACTOR, find_classpath, find_libjvm  # noqa: E402
+from pp_engine_mcp.config import DEFAULT_APP, Config  # noqa: E402
 
 OUT = Path(__file__).with_name("demo.xml")
 START = dt.date(2023, 1, 2)

@@ -4,7 +4,7 @@ import asyncio
 
 from fastmcp import Client
 
-from pp_mcp.server import read_only
+from pp_engine_mcp.server import read_only
 
 
 def _call(name, args=None):
@@ -37,8 +37,8 @@ def test_tool_call_returns_live_numbers(handle):
     assert data["count"] > 0
 
 
-WRITE_MODULES = ("pp_mcp.write_tools", "pp_mcp.staging", "pp_mcp.write_common", "pp_mcp.trade_tools",
-                 "pp_mcp.classification_tools")
+WRITE_MODULES = ("pp_engine_mcp.write_tools", "pp_engine_mcp.staging", "pp_engine_mcp.write_common", "pp_engine_mcp.trade_tools",
+                 "pp_engine_mcp.classification_tools")
 
 
 def _modules_after(code: str) -> set[str]:
@@ -58,17 +58,17 @@ print(json.dumps([m for m in {WRITE_MODULES!r} if m in sys.modules]))
 
 def test_importing_the_server_loads_no_write_code():
     """SAFETY.md layer 2: the write modules are imported inside read_write() only."""
-    assert _modules_after("import pp_mcp, pp_mcp.server, pp_mcp.__main__") == set()
+    assert _modules_after("import pp_engine_mcp, pp_engine_mcp.server, pp_engine_mcp.__main__") == set()
 
 
 def test_read_only_server_loads_no_write_code(config):
-    assert _modules_after("from pp_mcp.server import read_only; read_only()") == set()
+    assert _modules_after("from pp_engine_mcp.server import read_only; read_only()") == set()
 
 
 def test_write_server_adds_only_annotated_write_tools(config, tmp_path, monkeypatch):
-    from pp_mcp.bridge import set_config_provider
-    from pp_mcp.server import read_write
-    from pp_mcp.write_tools import STAGED_READ_TOOLS, WRITE_TOOLS
+    from pp_engine_mcp.bridge import set_config_provider
+    from pp_engine_mcp.server import read_write
+    from pp_engine_mcp.write_tools import STAGED_READ_TOOLS, WRITE_TOOLS
 
     monkeypatch.setenv("PP_STAGED_DIR", str(tmp_path / "staged"))
 

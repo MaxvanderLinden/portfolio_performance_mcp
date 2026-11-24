@@ -7,7 +7,7 @@ import json
 import pytest
 from fastmcp.exceptions import ToolError
 
-from pp_mcp import read_tools as rt
+from pp_engine_mcp import read_tools as rt
 
 
 @pytest.fixture(autouse=True)

@@ -13,15 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from pp_mcp.bridge import get_client
-from pp_mcp.config import ConfigError, load_config
+from pp_engine_mcp.bridge import get_client
+from pp_engine_mcp.config import ConfigError, load_config
 
 FIXTURE = Path(__file__).parent / "fixtures" / "demo.xml"
 
 
 @pytest.fixture(scope="session")
 def config():
-    root = Path(tempfile.mkdtemp(prefix="pp-mcp-tests-"))
+    root = Path(tempfile.mkdtemp(prefix="pp-engine-mcp-tests-"))
     replica = root / "portfolio.xml"
     shutil.copyfile(FIXTURE, replica)
     replica.chmod(0o444)

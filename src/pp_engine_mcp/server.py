@@ -1,4 +1,4 @@
-"""MCP servers over the portfolio: `pp-mcp` (read-only) and `pp-write` (adds staged writes).
+"""MCP servers over the portfolio: `pp-engine-mcp` (read-only) and `pp-write` (adds staged writes).
 
 The read-only server never imports the write modules: they are imported inside `read_write()`
 only, and `tests/test_server.py` checks that building the read server leaves them unloaded
@@ -85,7 +85,7 @@ def _run(build: Callable[[], FastMCP], name: str) -> None:
 
 
 def main() -> None:
-    _run(read_only, "pp-mcp")
+    _run(read_only, "pp-engine-mcp")
 
 
 def main_write() -> None:

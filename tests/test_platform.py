@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from pp_mcp.bridge import BridgeError, find_classpath, find_libjvm, newest_bundles
-from pp_mcp.config import Config, plugins_dir
+from pp_engine_mcp.bridge import BridgeError, find_classpath, find_libjvm, newest_bundles
+from pp_engine_mcp.config import Config, plugins_dir
 
 
 def _touch(path: Path) -> Path:

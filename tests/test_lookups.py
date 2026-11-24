@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import pytest
 from fastmcp.exceptions import ToolError
 
-from pp_mcp import read_tools, trade_tools
-from pp_mcp import write_common as w
+from pp_engine_mcp import read_tools, trade_tools
+from pp_engine_mcp import write_common as w
 
 SHARE = 10**8
 

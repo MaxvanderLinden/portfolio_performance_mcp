@@ -1,6 +1,6 @@
 """Print a summary of the replica, to be checked against the numbers the app shows.
 
-    python -m pp_mcp
+    python -m pp_engine_mcp
 """
 
 from __future__ import annotations
