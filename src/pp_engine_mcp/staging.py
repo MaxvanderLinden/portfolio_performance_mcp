@@ -22,6 +22,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import shlex
 import sys
 import threading
 from collections import Counter
@@ -381,6 +382,17 @@ def _check_consistency(reloaded: j.Client, base: Path) -> None:
         )
 
 
+def promote_command(area: StagingArea) -> str:
+    """The command for the user to run. The live file's path is never known here, so it stays a
+    placeholder; the staging folder is spelled out because the script's default may be another."""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "promote-staged.sh"
+    where = shlex.quote(str(script)) if script.is_file() else "scripts/promote-staged.sh"
+    return (
+        'PP_LIVE_FILE="/path/to/your/portfolio.xml" '
+        f"PP_STAGED_DIR={shlex.quote(str(area.directory.resolve()))} {where}"
+    )
+
+
 # --- the write path --------------------------------------------------------------------------
 
 
@@ -454,7 +466,8 @@ def apply(
             "staged_file": str(area.staged),
             "change": change,
             "pending_changes": len(manifest["changes"]),
-            "note": "Nothing was written to your real file. Review, then run scripts/promote-staged.sh.",
+            "note": "Nothing was written to your real file. Review the staged changes, quit Portfolio "
+                    f"Performance, then run in a terminal: {promote_command(area)}",
         }
 
 
