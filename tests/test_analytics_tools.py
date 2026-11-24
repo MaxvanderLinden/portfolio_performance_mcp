@@ -7,8 +7,8 @@ import json
 import pytest
 from fastmcp.exceptions import ToolError
 
-from pp_mcp import analytics_tools as at
-from pp_mcp import read_tools as rt
+from pp_engine_mcp import analytics_tools as at
+from pp_engine_mcp import read_tools as rt
 
 
 @pytest.fixture(autouse=True)
@@ -155,7 +155,7 @@ def test_period_help_is_filled_in():
 
 
 def test_series_reports_truncation_like_other_tools(handle, monkeypatch):
-    monkeypatch.setattr("pp_mcp.analytics_tools.MAX_SERIES_POINTS", 5)
+    monkeypatch.setattr("pp_engine_mcp.analytics_tools.MAX_SERIES_POINTS", 5)
     result = at.get_performance_series("1Y", sampling="daily")
     assert result["truncated"] and result["returned"] == len(result["series"]) == 5
     assert result["total_matching"] > 5

@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from pp_mcp import convert
+from pp_engine_mcp import convert
 
 
 def test_amount_scaling_is_exact():

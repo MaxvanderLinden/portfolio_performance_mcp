@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 from fastmcp.exceptions import ToolError
 
-from pp_mcp import analytics_tools, read_tools, staging, trade_tools
-from pp_mcp.bridge import set_config_provider
+from pp_engine_mcp import analytics_tools, read_tools, staging, trade_tools
+from pp_engine_mcp.bridge import set_config_provider
 
 FIXTURE = Path(__file__).parent / "fixtures" / "demo.xml"
 
@@ -160,7 +160,7 @@ def test_duplicate_trades_need_consent(area):
 
 
 def test_dividend_defaults_to_shares_held_everywhere(area, handle):
-    from pp_mcp.write_common import held
+    from pp_engine_mcp.write_common import held
 
     world = next(s for s in handle.client.getSecurities() if str(s.getTickerSymbol()) == "DWLD")
     expected = held(handle.client.getPortfolios(), world, dt.date(2026, 11, 3))

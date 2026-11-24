@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pp_mcp import convert
-from pp_mcp.bridge import fingerprint, get_client
+from pp_engine_mcp import convert
+from pp_engine_mcp.bridge import fingerprint, get_client
 
 
 def test_loads_and_caches(config, handle):

@@ -1,4 +1,4 @@
-"""Exercise pp-mcp over stdio, the way an MCP client does, against your configured replica.
+"""Exercise pp-engine-mcp over stdio, the way an MCP client does, against your configured replica.
 
     ./.venv/bin/python scripts/smoke_read.py         # a representative call from each group
     ./.venv/bin/python scripts/smoke_read.py list    # just enumerate the tools
@@ -17,7 +17,7 @@ from pathlib import Path
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
-SERVER = Path(sys.executable).with_name("pp-mcp")
+SERVER = Path(sys.executable).with_name("pp-engine-mcp")
 
 CALLS: list[tuple[str, dict[str, object]]] = [
     ("list_portfolios", {}),

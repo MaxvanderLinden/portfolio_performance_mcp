@@ -17,7 +17,7 @@ set -euo pipefail
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 
 LIVE="${PP_LIVE_FILE:?set PP_LIVE_FILE to your live Portfolio Performance .xml file}"
-STAGED_DIR="${PP_STAGED_DIR:-$HOME/pp-mcp/staged}"
+STAGED_DIR="${PP_STAGED_DIR:-$HOME/pp-engine-mcp/staged}"
 STAGED="$STAGED_DIR/portfolio.staged.xml"
 MANIFEST="$STAGED_DIR/manifest.json"
 BACKUPS="$STAGED_DIR/backups"

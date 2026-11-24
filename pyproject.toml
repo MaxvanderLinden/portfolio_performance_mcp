@@ -1,5 +1,5 @@
 [project]
-name = "pp-mcp"
+name = "pp-engine-mcp"
 version = "0.1.0"
 description = "MCP server for a local Portfolio Performance file: read-only, with optional staged writes"
 readme = "README.md"
@@ -28,13 +28,14 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/MaxvanderLinden/portfolio_performance_mcp"
-Issues = "https://github.com/MaxvanderLinden/portfolio_performance_mcp/issues"
+Homepage = "https://github.com/MaxvanderLinden/pp-engine-mcp"
+Issues = "https://github.com/MaxvanderLinden/pp-engine-mcp/issues"
 
 [project.scripts]
-pp-mcp = "pp_mcp.server:main"
-pp-read = "pp_mcp.server:main"  # original name, kept so existing registrations keep working
-pp-write = "pp_mcp.server:main_write"  # staged writes; register deliberately, see SAFETY.md
+pp-engine-mcp = "pp_engine_mcp.server:main"
+# Alias, kept so existing registrations keep working.
+pp-read = "pp_engine_mcp.server:main"
+pp-write = "pp_engine_mcp.server:main_write"  # staged writes; register deliberately, see SAFETY.md
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pyright>=1.1.400", "ruff>=0.12"]
@@ -44,7 +45,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pp_mcp"]
+packages = ["src/pp_engine_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -61,5 +62,5 @@ select = ["E4", "E7", "E9", "F", "I", "B"]
 include = ["src"]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
-# JPype has no stubs; its untyped proxies are cast to protocols in src/pp_mcp/jtypes.py.
+# JPype has no stubs; its untyped proxies are cast to protocols in src/pp_engine_mcp/jtypes.py.
 reportMissingTypeStubs = false

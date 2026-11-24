@@ -1,4 +1,4 @@
-# pp-mcp
+# pp-engine-mcp
 
 An [MCP](https://modelcontextprotocol.io) server that gives Claude (or any MCP client)
 **read-only** access to your [Portfolio Performance](https://www.portfolio-performance.info)
@@ -39,8 +39,8 @@ reports welcome.
 ## Install
 
 ```bash
-git clone https://github.com/MaxvanderLinden/portfolio_performance_mcp.git
-cd portfolio_performance_mcp
+git clone https://github.com/MaxvanderLinden/pp-engine-mcp.git
+cd pp-engine-mcp
 python3 -m venv .venv
 ./.venv/bin/pip install -e .
 ```
@@ -51,14 +51,14 @@ python3 -m venv .venv
 PP_LIVE_FILE="/path/to/your/portfolio.xml" ./scripts/refresh-replica.sh
 ```
 
-This copies your file to `~/pp-mcp/replica/portfolio.xml` and makes the copy read-only. Re-run it
+This copies your file to `~/pp-engine-mcp/replica/portfolio.xml` and makes the copy read-only. Re-run it
 after saving in the app to pick up your changes; the server reloads the replica automatically,
 no restart needed. (On Windows, copy the file yourself and mark the copy read-only.)
 
 Check that it loads and that the totals match the app:
 
 ```bash
-./.venv/bin/python -m pp_mcp
+./.venv/bin/python -m pp_engine_mcp
 ```
 
 ## Connect it to Claude
@@ -66,7 +66,7 @@ Check that it loads and that the totals match the app:
 **Claude Code:**
 
 ```bash
-claude mcp add portfolio -- "$PWD/.venv/bin/pp-mcp"
+claude mcp add portfolio -- "$PWD/.venv/bin/pp-engine-mcp"
 ```
 
 **Claude Desktop** — add this to `claude_desktop_config.json` (Settings → Developer → Edit Config),
@@ -76,7 +76,7 @@ using the absolute path to your clone:
 {
   "mcpServers": {
     "portfolio": {
-      "command": "/absolute/path/to/portfolio_performance_mcp/.venv/bin/pp-mcp"
+      "command": "/absolute/path/to/pp-engine-mcp/.venv/bin/pp-engine-mcp"
     }
   }
 }
@@ -88,12 +88,12 @@ Add an `"env": {...}` block to that entry if you need any of the settings below.
 
 | variable | default | meaning |
 | --- | --- | --- |
-| `PP_FILE` | `~/pp-mcp/replica/portfolio.xml` | the replica the server reads |
+| `PP_FILE` | `~/pp-engine-mcp/replica/portfolio.xml` | the replica the server reads |
 | `PP_APP_PATH` | macOS `/Applications/PortfolioPerformance.app`, Linux `/opt/portfolio`, Windows `%ProgramFiles%\PortfolioPerformance` | the Portfolio Performance install |
 | `JAVA_HOME` | unset | a Java 21+ runtime, used only if none is bundled with Portfolio Performance |
 | `PP_LIVE_FILE` | none (required) | your real file; read by `refresh-replica.sh` only |
 | `PP_ALLOW_WRITABLE_SOURCE` | unset | set to `1` to skip the read-only check (not recommended) |
-| `PP_STAGED_DIR` | `~/pp-mcp/staged` | where `pp-write` keeps staged changes; read by `promote-staged.sh` too |
+| `PP_STAGED_DIR` | `~/pp-engine-mcp/staged` | where `pp-write` keeps staged changes; read by `promote-staged.sh` too |
 
 The server **refuses to start on a writable `PP_FILE`**. That catches the dangerous mistake of
 pointing it at your real file instead of the replica.
@@ -129,7 +129,7 @@ so (`truncated`, `total_matching`), so narrow with date ranges rather than raisi
 
 A second server, `pp-write`, adds tools that **add** records (prices, transactions, …). It never
 touches your real file or the replica: every change goes into a staged copy in
-`~/pp-mcp/staged/` (`PP_STAGED_DIR`), checked by reloading it with Portfolio Performance's own
+`~/pp-engine-mcp/staged/` (`PP_STAGED_DIR`), checked by reloading it with Portfolio Performance's own
 classes. Once something is staged, its read tools show the staged copy.
 
 When you are happy with the changes, quit Portfolio Performance and promote them yourself:

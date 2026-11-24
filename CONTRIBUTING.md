@@ -54,13 +54,13 @@ temporary copy of the demo portfolio:
 
 Do not smoke-test with `fastmcp call`: MCP clients start servers with a filtered
 environment, so `PP_FILE`/`PP_STAGED_DIR` exported in your shell do not reach the server and it
-falls back to your real `~/pp-mcp` replica.
+falls back to your real `~/pp-engine-mcp` replica.
 
 **Never commit a real portfolio file.** `.gitignore` excludes `*.xml` except the demo fixture.
 
 ## Design notes
 
-- **Writes live in a separate server.** `pp-mcp` never imports `write_tools` or `staging`;
+- **Writes live in a separate server.** `pp-engine-mcp` never imports `write_tools` or `staging`;
   `pp-write` (`server.read_write()`) does. `tests/test_server.py` fails if building the read server
   loads either. Read [SAFETY.md](SAFETY.md) before adding a write tool.
 - **Every write goes through `staging.apply()`** with the counters it adds to, e.g.
@@ -92,8 +92,8 @@ falls back to your real `~/pp-mcp` replica.
 ## Using it as a library
 
 ```python
-from pp_mcp import get_client, fingerprint
-from pp_mcp.convert import jsonable, security
+from pp_engine_mcp import get_client, fingerprint
+from pp_engine_mcp.convert import jsonable, security
 
 handle = get_client()
 print(fingerprint(handle))

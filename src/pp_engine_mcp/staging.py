@@ -39,7 +39,7 @@ from .bridge import ensure_thread_attached, start_jvm
 from .config import Config, ConfigError, load_config
 from .jsontypes import JsonObject, JsonValue
 
-DEFAULT_STAGED_DIR = Path.home() / "pp-mcp" / "staged"
+DEFAULT_STAGED_DIR = Path.home() / "pp-engine-mcp" / "staged"
 STAGED_NAME = "portfolio.staged.xml"
 MANIFEST_NAME = "manifest.json"
 MANIFEST_VERSION = 1
@@ -114,7 +114,7 @@ class StagingArea:
 
 
 def staging_area(config: Config | None = None, env: Mapping[str, str] | None = None) -> StagingArea:
-    """Where staged changes go: `PP_STAGED_DIR`, default `~/pp-mcp/staged`."""
+    """Where staged changes go: `PP_STAGED_DIR`, default `~/pp-engine-mcp/staged`."""
     env = os.environ if env is None else env
     config = config or load_config(env)
     directory = Path(env.get("PP_STAGED_DIR", str(DEFAULT_STAGED_DIR))).expanduser()

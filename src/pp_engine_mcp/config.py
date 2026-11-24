@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_REPLICA = Path.home() / "pp-mcp" / "replica" / "portfolio.xml"
+DEFAULT_REPLICA = Path.home() / "pp-engine-mcp" / "replica" / "portfolio.xml"
 
 
 def _default_app() -> Path:
