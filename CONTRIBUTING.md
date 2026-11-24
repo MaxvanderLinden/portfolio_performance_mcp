@@ -7,18 +7,20 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m pytest
 ```
 
-Type-check with pyright in strict mode (CI runs this too):
+Type-check with pyright in strict mode and lint with ruff (CI runs both, plus ShellCheck):
 
 ```bash
 ./.venv/bin/pyright --pythonpath .venv/bin/python
+./.venv/bin/ruff check .
 ```
 
 Dependencies are pinned in `uv.lock` (`uv sync --extra dev` reproduces the environment).
 
 The integration tests run against `tests/fixtures/demo.xml`, a **fictional** portfolio — never your
 own data. They need Portfolio Performance installed (set `PP_APP_PATH` if it is not in the default
-place) and skip when it is missing, which is what happens in CI. Config, conversion,
-platform-discovery and server tests run everywhere.
+place) and skip when it is missing. CI runs them on Linux with a pinned Portfolio Performance;
+the other platforms run the config, conversion, lookup, script, platform-discovery and
+server-import tests.
 
 To change the demo portfolio, edit and re-run the generator, which builds it with Portfolio
 Performance's own classes:
@@ -27,15 +29,15 @@ Performance's own classes:
 ./.venv/bin/python tests/fixtures/make_demo.py
 ```
 
-`scripts/smoke.sh` calls the installed read server over stdio, the way an MCP client does, against
-your configured replica. `scripts/smoke_write.py` does the same for `pp-write`, always against a
+`scripts/smoke_read.py` calls the installed read server over stdio, the way an MCP client does,
+against your configured replica. `scripts/smoke_write.py` does the same for `pp-write`, always against a
 temporary copy of the demo portfolio:
 
 ```bash
 ./.venv/bin/python scripts/smoke_write.py
 ```
 
-Do not smoke-test `pp-write` with `fastmcp call`: MCP clients start servers with a filtered
+Do not smoke-test with `fastmcp call`: MCP clients start servers with a filtered
 environment, so `PP_FILE`/`PP_STAGED_DIR` exported in your shell do not reach the server and it
 falls back to your real `~/pp-mcp` replica.
 
@@ -48,7 +50,7 @@ falls back to your real `~/pp-mcp` replica.
   loads either. Read [SAFETY.md](SAFETY.md) before adding a write tool.
 - **Every write goes through `staging.apply()`** with the counters it adds to, e.g.
   `{"account_tx:DEPOSIT": 1}`. It saves to a temp file, reloads it, and refuses unless exactly those
-  counters grew; then it replaces the staged copy and logs the change in `manifest.json`. Add only;
+  counters grew and every existing record is unchanged; then it replaces the staged copy and logs the change in `manifest.json`. Add only;
   identify things exactly (UUID, ISIN, exact name), never by fragment.
 - **The JVM starts on the main thread**, in `read_only()`. FastMCP runs sync tools in worker
   threads and starting the JVM from one of those hangs; `get_client()` attaches each worker.

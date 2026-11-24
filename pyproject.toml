@@ -37,7 +37,7 @@ pp-read = "pp_mcp.server:main"  # original name, kept so existing registrations 
 pp-write = "pp_mcp.server:main_write"  # staged writes; register deliberately, see SAFETY.md
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pyright>=1.1.400"]
+dev = ["pytest>=8", "pyright>=1.1.400", "ruff>=0.12"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -49,6 +49,13 @@ packages = ["src/pp_mcp"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
 
 [tool.pyright]
 include = ["src"]

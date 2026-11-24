@@ -11,9 +11,10 @@ import glob
 import os
 import re
 import threading
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Callable, Mapping
+
 import jpype
 
 from . import jtypes as j

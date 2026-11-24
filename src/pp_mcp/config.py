@@ -15,6 +15,7 @@ from pathlib import Path
 
 DEFAULT_REPLICA = Path.home() / "pp-mcp" / "replica" / "portfolio.xml"
 
+
 def _default_app() -> Path:
     """Where the official installers put Portfolio Performance on each platform."""
     if sys.platform == "darwin":
@@ -72,7 +73,7 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
     stat = source.stat()
     if stat.st_size == 0:
         raise ConfigError(f"Replica {source} is empty.")
-    if stat.st_blocks == 0:
+    if getattr(stat, "st_blocks", None) == 0:  # Windows has no st_blocks
         raise ConfigError(
             f"Replica {source} is a dataless iCloud placeholder. Run: brctl download '{source}'"
         )

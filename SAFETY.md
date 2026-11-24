@@ -27,7 +27,7 @@ Reads lose nothing — the replica is 0.9 s to load and refreshes in a second.
 ## Layer 2 — the tool surface has no destructive verbs
 
 Claude cannot call a tool that does not exist. Implement **additive operations only**:
-`add_price`, `add_transaction`, `set_taxonomy_assignment`. Do not implement `delete_transaction`,
+`add_prices`, `record_buy`, `assign_classification`. Do not implement `delete_transaction`,
 `delete_security`, `replace_prices`, or any bulk `update_*`. Deletion stays a human action in the
 app. This is a design constraint, not a runtime check, so there is nothing to argue past.
 
@@ -35,10 +35,10 @@ Ship it as **two servers from one package**:
 
 | server | entry point | registered | tools |
 | --- | --- | --- | --- |
-| `pp-read` | `pp_mcp.server:read_only` | always | read + analytics, write module never imported |
-| `pp-write` | `pp_mcp.server:read_write` | only when you're actively editing | adds the additive tools |
+| `pp-mcp` (alias `pp-read`) | `pp_mcp.server:main` → `read_only()` | always | read + analytics, write module never imported |
+| `pp-write` | `pp_mcp.server:main_write` → `read_write()` | only when you're actively editing | adds the additive tools |
 
-Implemented: `pp-mcp`/`pp-read` and `pp-write` (`pyproject.toml`). Layer 3 lives in
+Both are implemented (`pyproject.toml`). Layer 3 lives in
 `src/pp_mcp/staging.py` and `scripts/promote-staged.sh`; the Layer 4 checks (process, compare
 against the base hash, atomic replace, declared-delta guard) are applied at promote time and on
 every staged write respectively.
@@ -48,13 +48,13 @@ every staged write respectively.
 Write tools produce a **proposed file plus a domain-level diff**, never touching the original:
 
 ```
-add_transaction(...) -> staged/portfolio.staged.xml
+record_buy(...) -> staged/portfolio.staged.xml
   + BUY 12 IE00XXXXXXXX @ EUR 98,20 on 2026-09-04  (Broker / Broker cash)
   fingerprint: transactions 120 -> 121, all other counters unchanged
 ```
 
 Before a change is staged, the saved copy is reloaded and must show exactly the declared change
-in its counters, and must not raise any consistency issue (PP's own `Checker`, run on a throwaway
+in its counters, must leave every existing record's contents unchanged, and must not raise any consistency issue (PP's own `Checker`, run on a throwaway
 copy because some checks repair in memory) that the file did not already have.
 
 You review the diff, open the staged file in PP, and Save As if you agree. Full write capability,
@@ -99,7 +99,7 @@ All four of these, together:
 ## Layer 6 — permissions in Claude Code
 
 Do not put write tools on an allowlist, and never run this project with permission prompts
-auto-accepted. Registering only `pp-read` by default means the write server has to be enabled
+auto-accepted. Registering only `pp-mcp` by default means the write server has to be enabled
 deliberately, which is the moment you actually think about it.
 
 ## Layer 7 — treat file contents as data
@@ -118,7 +118,7 @@ writer of the real file, Claude Code's permission prompt, and backups on another
 
 ## Recommended starting configuration
 
-1. Read-only replica + `pp-read` only. Use it for a week; check its numbers against the app.
+1. Read-only replica + `pp-mcp` only. Use it for a week; check its numbers against the app.
 2. Add `pp-write` in staging mode. Promote staged files by hand.
 3. Only consider direct live writes after the four Layer-4 controls are in place and tested — and
-   even then, keep `add_price` as the first and only live-writing tool for a while.
+   even then, keep `add_prices` as the first and only live-writing tool for a while.

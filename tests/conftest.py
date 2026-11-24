@@ -7,7 +7,6 @@ JRE) and skip when it is not installed; set PP_APP_PATH if it is not in /Applica
 
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -22,18 +21,21 @@ FIXTURE = Path(__file__).parent / "fixtures" / "demo.xml"
 
 @pytest.fixture(scope="session")
 def config():
-    replica = Path(tempfile.mkdtemp(prefix="pp-mcp-tests-")) / "portfolio.xml"
+    root = Path(tempfile.mkdtemp(prefix="pp-mcp-tests-"))
+    replica = root / "portfolio.xml"
     shutil.copyfile(FIXTURE, replica)
     replica.chmod(0o444)
-    os.environ["PP_FILE"] = str(replica)
-    os.environ.pop("PP_ALLOW_WRITABLE_SOURCE", None)
-    try:
-        yield load_config()
-    except ConfigError as exc:
-        pytest.skip(f"Portfolio Performance not available: {exc}")
-    finally:
-        replica.chmod(0o644)
-        shutil.rmtree(replica.parent, ignore_errors=True)
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv("PP_FILE", str(replica))
+        env.setenv("PP_STAGED_DIR", str(root / "staged"))  # never the user's own
+        env.delenv("PP_ALLOW_WRITABLE_SOURCE", raising=False)
+        try:
+            yield load_config()
+        except ConfigError as exc:
+            pytest.skip(f"Portfolio Performance not available: {exc}")
+        finally:
+            replica.chmod(0o644)
+            shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")

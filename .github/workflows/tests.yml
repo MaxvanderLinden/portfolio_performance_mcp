@@ -5,23 +5,57 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.11", "3.13"]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -e ".[dev]"
-      # Portfolio Performance is not installed on the runners, so the integration tests skip;
-      # config, conversion, platform-discovery and server-import tests still run.
-      - run: python -m pytest -q -rs
+      - run: python -m pip install uv
+      - run: uv sync --locked --extra dev --python ${{ matrix.python }}
+      # Portfolio Performance is not installed here, so the integration tests skip; they run in
+      # the integration job below.
+      - run: uv run --no-sync python -m pytest -q -rs
       # Strict typing for src/ (see [tool.pyright] in pyproject.toml); no Any.
-      - run: pyright --pythonpath "$(python -c 'import sys; print(sys.executable)')"
-      - run: for f in scripts/*.sh; do bash -n "$f"; done
+      - run: uv run --no-sync pyright
+      - run: uv run --no-sync ruff check .
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: shellcheck scripts/*.sh
+
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      PP_VERSION: "0.87.0"
+      PP_SHA256: 1c280c73cc3bad3daf90cd4f825b11f02680393aa97bf28c660f74bc2f91e792
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install Portfolio Performance
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pp.tar.gz" "https://github.com/portfolio-performance/portfolio/releases/download/$PP_VERSION/PortfolioPerformance-$PP_VERSION-linux.gtk.x86_64.tar.gz"
+          echo "$PP_SHA256  $RUNNER_TEMP/pp.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/pp.tar.gz" -C "$RUNNER_TEMP"
+          test -d "$RUNNER_TEMP/portfolio/plugins"
+          echo "PP_APP_PATH=$RUNNER_TEMP/portfolio" >> "$GITHUB_ENV"
+          # The Linux build may not bundle a Java runtime; the runner image ships Java 21.
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+      - run: python -m pip install uv
+      - run: uv sync --locked --extra dev --python 3.13
+      - run: uv run --no-sync python -m pytest -q -rs
+      - run: uv run --no-sync python scripts/smoke_write.py

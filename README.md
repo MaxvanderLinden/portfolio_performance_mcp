@@ -9,9 +9,12 @@ file, so you can ask questions like:
 - *"Show my allocation by region and how much is unclassified."*
 - *"List every fee I paid in 2025."*
 
+The default server never writes anything. A separate, optional server can
+[stage additions](#staged-writes-optional-in-development) in a copy for you to review. See
+[SAFETY.md](SAFETY.md) for how both are kept away from your real file.
+
 It loads your file with Portfolio Performance's own Java classes, so returns, IRR, cost basis and
-allocations are the same numbers the app shows. It never writes anything — see [SAFETY.md](SAFETY.md)
-for how it is kept away from your real file.
+allocations are the same numbers the app shows.
 
 > Unofficial project, not affiliated with Portfolio Performance. Not financial advice.
 
@@ -111,15 +114,16 @@ pointing it at your real file instead of the replica.
 | `get_dividends` | dividend income in the base currency, grouped by year or security |
 | `get_performance_series` | the TTWROR curve, sampled monthly/weekly/daily |
 
-**Periods** accept aliases (`1M`, `3M`, `6M`, `1Y`, `3Y`, `5Y`, `YTD`, `MTD`, `QTD`, `MAX`),
+**Periods** accept aliases (`1M`, `3M`, `6M`, `1Y`, `2Y`, `3Y`, `5Y`, `10Y`, `YTD`, `MTD`, `QTD`,
+`WTD`, `MAX`),
 a calendar year (`2025`), a range (`2024-01-01..2024-12-31`), or Portfolio Performance's own codes
 (`L1Y0`, `D30`, `T30`, `S2020-01-01`); responses echo the resolved dates.
 
 **Rates are fractions:** `0.223` is 22.3%. `irr` and `ttwror_annualized` are annualized; `ttwror` is
 cumulative over the period. **Scopes:** `client`, `portfolio`, `account`, `security`, `classification`.
 
-Every tool is marked read-only. Large responses are capped and say so (`truncated`,
-`total_matching`), so narrow with date ranges rather than raising `limit`.
+Every tool is marked read-only. Transactions, prices and the performance series are capped and say
+so (`truncated`, `total_matching`), so narrow with date ranges rather than raising `limit`.
 
 ## Staged writes (optional, in development)
 
@@ -134,8 +138,9 @@ When you are happy with the changes, quit Portfolio Performance and promote them
 PP_LIVE_FILE="/path/to/your/portfolio.xml" ./scripts/promote-staged.sh
 ```
 
-It refuses if the app is running (or if it cannot tell) or if your file changed since the
-replica was taken, asks for confirmation at the terminal, backs up your file, and refreshes the
+It shows every staged change with its amounts. It refuses if the app is running (or if it cannot
+tell), if your file changed since the replica was taken, or if anything changed while you were
+reviewing. It asks for confirmation at the terminal, backs up your file, and refreshes the
 replica. On Windows, run it from Git Bash or WSL; that path is untested so far. Register `pp-write`
 only while you are editing (`claude mcp add portfolio-write -- "$PWD/.venv/bin/pp-write"`), and
 read [SAFETY.md](SAFETY.md) first.

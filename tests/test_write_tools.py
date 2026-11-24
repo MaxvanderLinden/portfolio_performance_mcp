@@ -105,7 +105,7 @@ def test_removal_lowers_the_balance(area):
 
 def test_duplicates_need_explicit_consent(area):
     write_tools.record_cash("Broker cash", "FEES", 5, "2026-11-03")
-    with pytest.raises(ToolError, match="already has a FEES"):
+    with pytest.raises(ToolError, match="already a FEES of EUR 5.00"):
         write_tools.record_cash("Broker cash", "FEES", 5, "2026-11-03")
     assert staging.status(area)["pending_changes"] == 1
 
