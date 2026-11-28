@@ -107,7 +107,7 @@ def test_assign_account_split_over_two_regions(area):
     assert staging.status(area)["pending_changes"] == 2
 
     with pytest.raises(ToolError, match="would exceed 100%"):
-        ct.assign_classification("Regions", "North America", account="Savings", weight="0.01")
+        ct.assign_classification("Regions", "North America", account="Savings", weight="0.01%")
 
 
 def test_assign_to_a_new_classification(area):
@@ -117,13 +117,17 @@ def test_assign_to_a_new_classification(area):
 
 
 @pytest.mark.parametrize("classification, kwargs, message", [
-    ("North America", {"security": "DWLD", "weight": 1}, "already is in|already in"),
-    ("Emerging markets", {"security": "DWLD", "weight": 1}, "would exceed 100%"),
+    ("North America", {"security": "DWLD", "weight": "1%"}, "already is in|already in"),
+    ("Emerging markets", {"security": "DWLD", "weight": "1%"}, "would exceed 100%"),
     ("Regions", {"security": "DUSC"}, "no classification in Regions"),
     ("Mars", {"security": "DUSC"}, "no classification in Regions"),
     ("Europe", {"security": "DUSC", "account": "Savings"}, "exactly one of security or account"),
     ("Europe", {}, "exactly one of security or account"),
     ("Europe", {"security": "DUSC", "weight": 101}, "cannot exceed 100"),
+    ("Europe", {"security": "DUSC", "weight": 0.15}, r'write "0.15%" for 0.15 percent, or 15.00 if'),
+    ("Europe", {"security": "DUSC", "weight": 1}, 'write "1%" for 1 percent, or 100 if'),
+    ("Europe", {"security": "DUSC", "weight": "101%"}, "cannot exceed 100"),
+    ("Europe", {"security": "DUSC", "weight": "%"}, "must be a number"),
     ("Europe", {"security": "DUSC", "weight": 0}, "greater than zero"),
     ("Europe", {"security": "DUSC", "weight": "33.333"}, "decimal places"),
     ("Europe", {"security": "Demo"}, "no security is exactly"),
@@ -133,6 +137,12 @@ def test_assign_refusals(area, classification, kwargs, message):
     with pytest.raises(ToolError, match=message):
         ct.assign_classification("Regions", classification, **kwargs)
     assert _nothing_staged(area)
+
+
+@pytest.mark.parametrize("weight, percent", [("15%", 15.0), (" 0.5 % ", 0.5), (1.5, 1.5), ("1%", 1.0)])
+def test_weight_spellings(area, weight, percent):
+    result = ct.assign_classification("Regions", "Europe", security="DUSC", weight=weight)
+    assert result["change"]["details"]["weight_percent"] == percent
 
 
 def test_classification_found_by_id_and_full_path(area):

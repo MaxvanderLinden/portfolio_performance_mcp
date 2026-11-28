@@ -19,6 +19,7 @@ from pathlib import Path
 import jpype
 
 from . import jtypes as j
+from . import rates
 from .config import Config, load_config
 
 # Fixed-point scaling used throughout the PP model; verified against Values.* at startup.
@@ -59,13 +60,20 @@ class ClientHandle:
     path: Path
     mtime_ns: int
     size: int
+    rates: rates.Rates
+    rates_file: Path | None
+    rates_id: rates.FileId | None
 
     def is_stale(self) -> bool:
         try:
             stat = self.path.stat()
         except OSError:
             return True
-        return stat.st_mtime_ns != self.mtime_ns or stat.st_size != self.size
+        return (
+            stat.st_mtime_ns != self.mtime_ns
+            or stat.st_size != self.size
+            or rates.file_id(self.rates_file) != self.rates_id
+        )
 
 
 def find_libjvm(config: Config, env: Mapping[str, str] | None = None) -> Path:
@@ -189,18 +197,19 @@ def _load(config: Config) -> ClientHandle:
     finally:
         stream.close()
 
+    rates_id = rates.file_id(config.rates_file)  # before reading, so a later change is noticed
+    factory = j.exchange_rate_provider_factory()(client)
+    loaded_rates = rates.load(client, factory, config.rates_file)
     return ClientHandle(
         client=client,
-        converter=currency_converter(client),
+        converter=j.currency_converter_impl()(factory, str(client.getBaseCurrency())),
         path=config.source,
         mtime_ns=stat.st_mtime_ns,
         size=stat.st_size,
+        rates=loaded_rates,
+        rates_file=config.rates_file,
+        rates_id=rates_id,
     )
-
-
-def currency_converter(client: j.Client, currency: str | None = None) -> j.CurrencyConverter:
-    factory = j.exchange_rate_provider_factory()(client)
-    return j.currency_converter_impl()(factory, currency or str(client.getBaseCurrency()))
 
 
 def set_config_provider(provider: "Callable[[], Config] | None") -> None:
@@ -222,6 +231,7 @@ def get_client(config: Config | None = None, force_reload: bool = False) -> Clie
             force_reload
             or _cache is None
             or _cache.path != config.source
+            or _cache.rates_file != config.rates_file
             or _cache.is_stale()
         ):
             _cache = _load(config)

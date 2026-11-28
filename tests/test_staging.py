@@ -70,7 +70,7 @@ def area(config, tmp_path):
     shutil.copyfile(FIXTURE, replica)
     replica.chmod(0o444)
     return staging.staging_area(
-        Config(source=replica, app_path=config.app_path),
+        Config(source=replica, app_path=config.app_path, rates_file=config.rates_file),
         env={"PP_STAGED_DIR": str(tmp_path / "staged")},
     )
 

@@ -13,8 +13,14 @@ The default server never writes anything. A separate, optional server can
 [stage additions](#staged-writes-optional-in-development) in a copy for you to review. See
 [SAFETY.md](SAFETY.md) for how both are kept away from your real file.
 
-It loads your file with Portfolio Performance's own Java classes, so returns, IRR, cost basis and
-allocations are the same numbers the app shows.
+It loads your file with Portfolio Performance's own Java classes, and converts currencies with the
+exchange rates the app last downloaded, so returns, IRR, cost basis and allocations should be the
+numbers the app shows. Where they may not be (no exchange rate for a currency, or a rate or price
+more than a week old), the response says so in `warnings`.
+
+Portfolio Performance also has its own experimental MCP server, built into the app. This is a
+separate project. The two can be connected side by side, but they write classification weights
+differently (see `assign_classification` below).
 
 > Unofficial project, not affiliated with Portfolio Performance. Not financial advice.
 
@@ -55,7 +61,8 @@ This copies your file to `~/pp-engine-mcp/replica/portfolio.xml` and makes the c
 after saving in the app to pick up your changes; the server reloads the replica automatically,
 no restart needed. (On Windows, copy the file yourself and mark the copy read-only.)
 
-Check that it loads and that the totals match the app:
+Open Portfolio Performance once in a while: the exchange rates come from the cache the app keeps
+up to date (read only, never written). Check that it loads and that the totals match the app:
 
 ```bash
 ./.venv/bin/python -m pp_engine_mcp
@@ -93,6 +100,7 @@ Add an `"env": {...}` block to that entry if you need any of the settings below.
 | `JAVA_HOME` | unset | a Java 21+ runtime, used only if none is bundled with Portfolio Performance |
 | `PP_LIVE_FILE` | none (required) | your real file; read by `refresh-replica.sh` only |
 | `PP_ALLOW_WRITABLE_SOURCE` | unset | set to `1` to skip the read-only check (not recommended) |
+| `PP_RATES_FILE` | the app's cache, e.g. macOS `~/Library/Application Support/name.abuchen.portfolio.product/workspace/.metadata/.plugins/name.abuchen.portfolio/ecb_exchange_rates.pb`; Linux `~/.PortfolioPerformance/workspace/…`, Windows `%LOCALAPPDATA%\PortfolioPerformance\workspace\…` | the exchange rates; read only |
 | `PP_STAGED_DIR` | `~/pp-engine-mcp/staged` | where `pp-write` keeps staged changes; read by `promote-staged.sh` too |
 
 The server **refuses to start on a writable `PP_FILE`**. That catches the dangerous mistake of
@@ -104,7 +112,7 @@ pointing it at your real file instead of the replica.
 | --- | --- |
 | `list_securities` | securities with latest price, `include_retired` optional |
 | `list_accounts` / `list_portfolios` | current cash balances / market values |
-| `get_holdings` | every position and account with share of total, optionally on a past date |
+| `get_holdings` | every position and account with share of total, and the price and price date each is valued at, optionally on a past date |
 | `get_transactions` | filtered by security, account, portfolio, type, date range; a buy or sell is one row with both its portfolio and cash account |
 | `get_prices` | history plus the latest quote, with a summary of the full range |
 | `list_taxonomies` / `get_allocation` | classification schemes and the breakdown by one |
@@ -121,6 +129,10 @@ a calendar year (`2025`), a range (`2024-01-01..2024-12-31`), or Portfolio Perfo
 
 **Rates are fractions:** `0.223` is 22.3%. `irr` and `ttwror_annualized` are annualized; `ttwror` is
 cumulative over the period. **Scopes:** `client`, `portfolio`, `account`, `security`, `classification`.
+
+**Warnings:** every tool that converts currencies, and `get_holdings`, returns `warnings`: a
+currency with no exchange rate (Portfolio Performance then counts it 1:1), a rate or price more than
+a week older than the date it is used for, or exchange rates that could not be read.
 
 Every tool is marked read-only. Transactions, prices and the performance series are capped and say
 so (`truncated`, `total_matching`), so narrow with date ranges rather than raising `limit`.
@@ -161,6 +173,10 @@ read [SAFETY.md](SAFETY.md) first.
 | `record_delivery` | shares in or out of a portfolio without cash (`direction` inbound/outbound), e.g. a transfer from another broker |
 | `add_classification` | a new category in a taxonomy, at the top level or under a `parent` (id, name or path such as `Developed markets » Europe`); refuses a name its parent already has |
 | `assign_classification` | puts a `security` or `account` into a category with a `weight` in percent; refuses one already in that category or weights above 100% in the taxonomy |
+
+**Weights are percentages:** `15` or `"15%"` is 15%. Other tools, Portfolio Performance's own MCP
+server among them, write weights as fractions (`0.15`), so a bare number of 1 or less is refused;
+write `"0.5%"` for half a percent.
 | `get_staged_changes` | what is staged, and whether it can still be promoted |
 | `discard_staged` | moves the staged copy to `backups/` and starts over from the replica |
 
@@ -203,6 +219,7 @@ Afterwards, run `claude mcp remove pp-demo-write` and delete `~/pp-demo`.
 | `No Java runtime found` / `Could not start the Java runtime` | usually a Python/Java architecture mismatch; use a Python built for the same architecture as Portfolio Performance, or set `JAVA_HOME` |
 | `the replica was refreshed after these changes were staged` | promote them if your file is unchanged since; otherwise ask for `discard_staged`, then stage them again |
 | `… was modified outside pp-write` | the staged copy was edited, e.g. saved in the app; ask for `discard_staged`, then stage again |
+| `exchange rates were not found` / `rate … is from` (in `warnings`) | open Portfolio Performance while online so it updates its rates, or set `PP_RATES_FILE` |
 | `… dataless iCloud placeholder` | the file is not downloaded yet; open it in Finder, or run the `brctl download` command shown |
 
 ## Development

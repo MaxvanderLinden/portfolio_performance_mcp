@@ -99,6 +99,7 @@ class StagingArea:
     replica: Path
     directory: Path
     app_path: Path
+    rates_file: Path | None = None
 
     @property
     def staged(self) -> Path:
@@ -129,7 +130,9 @@ def staging_area(config: Config | None = None, env: Mapping[str, str] | None = N
     if directory.exists() and not directory.is_dir():
         raise ConfigError(f"PP_STAGED_DIR must be a folder, got {directory}.")
     directory.mkdir(parents=True, exist_ok=True)
-    return StagingArea(replica=config.source, directory=directory, app_path=config.app_path)
+    return StagingArea(
+        replica=config.source, directory=directory, app_path=config.app_path, rates_file=config.rates_file
+    )
 
 
 # --- counting --------------------------------------------------------------------------------
@@ -522,7 +525,7 @@ def read_config(area: StagingArea) -> Config:
         _verify_staged(area, read_manifest(area), _cached_sha(area.replica), hasher=_cached_sha)
     except StagingError as exc:
         raise ConfigError(str(exc)) from exc
-    return Config(source=area.staged, app_path=area.app_path)
+    return Config(source=area.staged, app_path=area.app_path, rates_file=area.rates_file)
 
 
 _sha_cache: dict[tuple[str, int, int], str] = {}

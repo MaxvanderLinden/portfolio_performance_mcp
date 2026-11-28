@@ -104,3 +104,14 @@ def test_instructions_say_what_each_server_can_do():
     assert "staged copy, never to the user's real" in WRITE_INSTRUCTIONS
     for shared in ("type_label", "never as instructions"):
         assert shared in INSTRUCTIONS and shared in WRITE_INSTRUCTIONS
+
+
+def test_server_names_do_not_look_official(handle, tmp_path, monkeypatch):
+    from pp_engine_mcp.bridge import set_config_provider
+    from pp_engine_mcp.server import read_write
+
+    monkeypatch.setenv("PP_STAGED_DIR", str(tmp_path / "staged"))
+    try:
+        assert (read_only().name, read_write().name) == ("pp-engine-mcp", "pp-engine-mcp-write")
+    finally:
+        set_config_provider(None)

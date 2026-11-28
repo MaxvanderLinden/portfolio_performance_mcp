@@ -145,6 +145,22 @@ def add_classification(taxonomy: str, name: str, parent: str | None = None) -> s
     return w.staged(f"add classification {clean_name}{where} to {taxonomy}", {"classifications": 1}, mutate)
 
 
+def _weight(weight: float | str) -> int:
+    """A percentage in basis points. Other tools write weights as fractions, where 0.15 is 15% and
+    1 is everything, so a bare number up to 1 is ambiguous and refused."""
+    text = str(weight).strip()
+    number = text.removesuffix("%").strip()
+    basis_points = w.fixed_point(number, 100, "weight", 2)
+    if basis_points > _hundred():
+        raise ToolError(f"weight is a percentage and cannot exceed 100, got {weight!r}")
+    if basis_points <= 100 and number == text:
+        raise ToolError(
+            f"weight is a percentage, not a fraction, so {weight!r} is ambiguous: write \"{number}%\" for "
+            f"{number} percent, or {Decimal(number) * 100:f} if you meant that fraction of the whole"
+        )
+    return basis_points
+
+
 def assign_classification(
     taxonomy: str,
     classification: str,
@@ -164,12 +180,11 @@ def assign_classification(
         security: the security (UUID, ISIN, ticker or full name). Give this or account.
         account: the cash account (UUID or full name). Give this or security.
         weight: percent of the security or account that belongs here, up to 2 decimals (default 100).
+            Write 15 or "15%" for 15%, not 0.15. One percent or less needs the sign: "0.5%".
     """
     if (security is None) == (account is None):
         raise ToolError("give exactly one of security or account")
-    basis_points = w.fixed_point(weight, 100, "weight", 2)
-    if basis_points > _hundred():
-        raise ToolError(f"weight is a percentage and cannot exceed 100, got {weight!r}")
+    basis_points = _weight(weight)
 
     def mutate(client: j.Client) -> JsonObject:
         scheme = exact_taxonomy(client, taxonomy)
@@ -203,7 +218,7 @@ def assign_classification(
 
     what = security if security is not None else account
     return w.staged(
-        f"assign {what} to {classification} in {taxonomy} ({weight}%)", {"assignments": 1}, mutate
+        f"assign {what} to {classification} in {taxonomy} ({_percent(basis_points):g}%)", {"assignments": 1}, mutate
     )
 
 

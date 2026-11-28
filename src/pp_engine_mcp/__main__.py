@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import sys
 
 from . import jtypes as j
@@ -34,6 +35,8 @@ def main() -> int:
         f"{marks.taxonomies} taxonomies, {marks.transactions} transactions, {marks.prices:,} prices"
     )
     print(f"total assets: {marks.total_assets}")
+    for warning in handle.rates.warnings(dt.date.today()):
+        print(f"warning: {warning}")
 
     snapshot = j.client_snapshot().create(client, handle.converter, j.local_date().now())
 

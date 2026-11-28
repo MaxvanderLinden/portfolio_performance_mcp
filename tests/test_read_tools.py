@@ -138,3 +138,20 @@ def test_account_filter_includes_trades_settled_on_it():
 
     unrelated = rt.get_transactions(account="Savings", type="BUY", limit=1000)
     assert unrelated["total_matching"] == 0
+
+
+def test_holdings_show_how_old_each_price_is():
+    for holding in rt.get_holdings("2026-11-03")["holdings"]:
+        if holding["kind"] == "SECURITY":
+            assert holding["price_date"] == "2026-11-02"
+            assert holding["price"] > 0 and holding["price_currency"]
+        else:
+            assert holding["price_date"] is None and holding["price"] is None
+
+
+def test_holdings_warn_about_old_prices_only():
+    def prices(date):
+        return [w for w in rt.get_holdings(date)["warnings"] if "price" in w]
+
+    assert prices("2026-11-09") == []
+    assert any("is from 2026-11-02" in w for w in prices("2026-11-10"))
