@@ -112,6 +112,13 @@ Do not put write tools on an allowlist, and never run this project with permissi
 auto-accepted. Registering only `pp-engine-mcp` by default means the write server has to be enabled
 deliberately, which is the moment you actually think about it.
 
+## Exchange rates
+
+To convert currencies as the app does, the servers read one file of the app's own: its cache of
+ECB exchange rates (`PP_RATES_FILE`, by default in the app's workspace folder). They open it
+read-only and never write, lock or download it; if it is missing or unreadable, they say so in
+`warnings` instead of failing.
+
 ## Layer 7 — treat file contents as data
 
 Security names, account names and transaction notes are free text that flows from the file into

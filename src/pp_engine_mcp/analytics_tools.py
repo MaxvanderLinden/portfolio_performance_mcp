@@ -84,6 +84,10 @@ def _interval_dates(interval: j.Interval) -> dict[str, str]:
     }
 
 
+def _rate_warnings(handle: ClientHandle, interval: j.Interval) -> list[str]:
+    return handle.rates.warnings(convert.date_of(interval.getStart()), convert.date_of(interval.getEnd()))
+
+
 def _percent(value: float) -> float | None:
     """Java returns NaN where a period holds no data; JSON has no NaN."""
     value = float(value)
@@ -181,7 +185,7 @@ def get_performance(period: str = "1Y", scope: str = "client", name: str | None 
         "max_drawdown": _percent(drawdown.getMaxDrawdown()),
         "volatility": _percent(volatility.getStandardDeviation()),
         "semi_volatility": _percent(volatility.getSemiDeviation()),
-        "warnings": warnings,
+        "warnings": warnings + _rate_warnings(handle, interval),
         "note": "rates are fractions (0.223 is 22.3%); irr and ttwror_annualized are annualized, "
                 "ttwror is cumulative over the period",
     }
@@ -239,6 +243,7 @@ def get_performance_snapshot(period: str = "1Y") -> JsonObject:
         "earnings": positions_of("EARNINGS"),
         "fees": positions_of("FEES"),
         "taxes": positions_of("TAXES"),
+        "warnings": _rate_warnings(handle, interval),
     }
 
 
@@ -294,6 +299,7 @@ def get_security_performance(
         "count": len(rows),
         "securities": rows,
         "note": "rates are fractions: 0.223 is 22.3%",
+        "warnings": _rate_warnings(handle, interval),
     }
 
 
@@ -381,6 +387,7 @@ def get_dividends(
         "total_net": round(float(total), 2),
         "payments": count,
         "groups": rows,
+        "warnings": _rate_warnings(handle, interval),
     }
 
 
@@ -431,7 +438,7 @@ def get_performance_series(
         "points": len(keep),
         "available_points": len(dates),
         **meta,
-        "warnings": warnings,
+        "warnings": warnings + _rate_warnings(handle, interval),
         "series": [
             {
                 "date": dates[position].isoformat(),

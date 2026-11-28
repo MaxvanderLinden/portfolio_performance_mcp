@@ -22,6 +22,7 @@ from . import convert
 from . import jtypes as j
 from .bridge import ClientHandle, get_client
 from .jsontypes import JsonObject
+from .rates import STALE_AFTER
 
 MAX_PRICE_ROWS = 250
 MAX_TRANSACTION_ROWS = 100
@@ -154,7 +155,7 @@ def list_accounts() -> JsonObject:
          "balance": convert.jsonable(convert.money(position.getFunds()))}
         for position in snapshot.getAccounts()
     ]
-    return {"count": len(accounts), "accounts": accounts}
+    return {"count": len(accounts), "accounts": accounts, "warnings": handle.rates.warnings(dt.date.today())}
 
 
 def list_portfolios() -> JsonObject:
@@ -166,11 +167,14 @@ def list_portfolios() -> JsonObject:
          "value": convert.jsonable(convert.money(position.getValue()))}
         for position in snapshot.getPortfolios()
     ]
-    return {"count": len(portfolios), "portfolios": portfolios}
+    return {"count": len(portfolios), "portfolios": portfolios, "warnings": handle.rates.warnings(dt.date.today())}
 
 
 def get_holdings(date: str | None = None) -> JsonObject:
     """Current holdings — every security position and cash account, with share of total assets.
+
+    A security is valued at its last known price up to the date; `price_date` says how old that is,
+    and `warnings` lists prices and exchange rates more than a week old.
 
     Args:
         date: value the portfolio on this ISO date instead of today.
@@ -178,17 +182,31 @@ def get_holdings(date: str | None = None) -> JsonObject:
     handle = get_client()
     on = parse_date(date, "date")
     snapshot = _snapshot(handle, on)
+    day = on or dt.date.today()
+    warnings = handle.rates.warnings(day)
 
     rows: list[tuple[Decimal, JsonObject]] = []
     for position in snapshot.getAssetPositions().toList():
         security_position = position.getPosition()
         held = position.getSecurity()
         value = convert.money_of(position.getValuation())
+        name = str(position.getDescription())
+        price = convert.price(security_position.getPrice()) if security_position is not None and held is not None else None
+        if price is not None and price.value == 0:
+            warnings.append(f"{name} has no price up to {day}, so it is valued at zero.")
+            price = None
+        elif price is not None and price.date > day:
+            warnings.append(f"{name} has no price up to {day}; it is valued at the one of {price.date}.")
+        elif price is not None and day - price.date > STALE_AFTER:
+            warnings.append(f"The last price of {name} up to {day} is from {price.date}.")
         rows.append((value.amount, {
-            "name": str(position.getDescription()),
+            "name": name,
             "kind": "SECURITY" if held is not None else "ACCOUNT",
             "isin": convert.text(held.getIsin()) if held is not None else None,
             "shares": convert.jsonable(convert.shares(int(security_position.getShares()))) if security_position is not None else None,
+            "price": convert.jsonable(price.value) if price is not None else None,
+            "price_currency": convert.text(held.getCurrencyCode()) if held is not None else None,
+            "price_date": price.date.isoformat() if price is not None else None,
             "value": convert.jsonable(value),
             "share_of_total": round(float(position.getShare()), 6),
         }))
@@ -196,8 +214,9 @@ def get_holdings(date: str | None = None) -> JsonObject:
     rows.sort(key=lambda row: row[0], reverse=True)
     holdings: list[JsonObject] = [row for _, row in rows]
     return {
-        "date": (on or dt.date.today()).isoformat(),
+        "date": day.isoformat(),
         "total_assets": convert.jsonable(convert.money(snapshot.getMonetaryAssets())),
+        "warnings": warnings,
         "count": len(holdings),
         "holdings": holdings,
     }
@@ -451,6 +470,7 @@ def get_allocation(taxonomy: str, date: str | None = None, depth: int = 2) -> Js
         "classified": round(float(classified), 2),
         "unassigned": round(float(unassigned), 2),
         "allocation": buckets,
+        "warnings": handle.rates.warnings(on or dt.date.today()),
     }
 
 

@@ -28,6 +28,18 @@ def _default_app() -> Path:
 DEFAULT_APP = _default_app()
 
 
+def default_rates_file(env: Mapping[str, str] | None = None) -> Path:
+    """Where the app caches the ECB exchange rates: its workspace folder, per platform."""
+    env = os.environ if env is None else env
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "name.abuchen.portfolio.product"
+    elif sys.platform == "win32":
+        base = Path(env.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "PortfolioPerformance"
+    else:
+        base = Path.home() / ".PortfolioPerformance"
+    return base / "workspace" / ".metadata" / ".plugins" / "name.abuchen.portfolio" / "ecb_exchange_rates.pb"
+
+
 class ConfigError(Exception):
     """Raised when the environment cannot be trusted to be read-only."""
 
@@ -36,6 +48,7 @@ class ConfigError(Exception):
 class Config:
     source: Path
     app_path: Path
+    rates_file: Path | None = None  # the app's exchange rate cache; read only
 
     @property
     def plugins(self) -> Path:
@@ -87,4 +100,12 @@ def load_config(env: Mapping[str, str] | None = None) -> Config:
             "Set PP_ALLOW_WRITABLE_SOURCE=1 only if you understand why that is unsafe."
         )
 
-    return Config(source=source, app_path=app_path)
+    # An absent default is only a warning later: a file in one currency needs no rates.
+    if env.get("PP_RATES_FILE"):
+        rates_file = Path(env["PP_RATES_FILE"]).expanduser()
+        if not rates_file.is_file():
+            raise ConfigError(f"PP_RATES_FILE must be an exchange rate file, but there is none at {rates_file}.")
+    else:
+        rates_file = default_rates_file(env)
+
+    return Config(source=source, app_path=app_path, rates_file=rates_file)

@@ -25,9 +25,12 @@ def config():
     replica = root / "portfolio.xml"
     shutil.copyfile(FIXTURE, replica)
     replica.chmod(0o444)
+    rates = root / "rates.pb"
+    rates.touch()  # a valid cache with no rates, so the built-in ones apply
     with pytest.MonkeyPatch.context() as env:
         env.setenv("PP_FILE", str(replica))
         env.setenv("PP_STAGED_DIR", str(root / "staged"))  # never the user's own
+        env.setenv("PP_RATES_FILE", str(rates))  # nor the app's
         env.delenv("PP_ALLOW_WRITABLE_SOURCE", raising=False)
         try:
             yield load_config()

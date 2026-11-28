@@ -80,6 +80,14 @@ falls back to your real `~/pp-engine-mcp` replica.
 - **Decimals, not floats.** Money, shares and quotes are fixed-point longs in Java (÷100, ÷10⁸,
   ÷10⁸, verified against `Values.*` at startup). They become `Decimal`; `jsonable()` converts at
   the boundary.
+- **Exchange rates come from the app's cache.** Outside the app, PP's ECB provider has nowhere to
+  load from and knows one built-in rate per currency (2015-12-18), applied to every date.
+  `rates.py` reads the app's `ecb_exchange_rates.pb` with PP's own protobuf class and adds its rates
+  to the provider's series, for the currencies the file uses; a changed cache reloads the client.
+  Those series belong to the JVM, so `tests/test_rates.py` runs each case in its own interpreter.
+  The tests' cache is empty (`conftest.py`), so they never read your app's rates.
+- **Say when a number may be off.** PP converts silently at 1:1 without a rate, and with an old
+  rate when that is all it has. `Rates.warnings()` reports both; every converting tool returns it.
 - **One currency per total.** Anything summed across transactions goes through `handle.converter`
   into the base currency first, as Portfolio Performance does.
 - **Notes are off by default.** `include_notes=True` is opt-in, because free text in the file

@@ -60,7 +60,8 @@ def test_snapshot_categories_form_a_waterfall():
     contributions = sum(
         category["value"] for category in snapshot["categories"] if category["sign"] != "="
     )
-    assert contributions == pytest.approx(by_type["FINAL_VALUE"]["value"], abs=0.01)
+    # PP converts and rounds each category on its own; with two currencies a cent or two can differ.
+    assert contributions == pytest.approx(by_type["FINAL_VALUE"]["value"], abs=0.021)
     assert by_type["FEES"]["value"] <= 0 and by_type["TAXES"]["value"] <= 0
 
 
@@ -70,7 +71,7 @@ def test_absolute_delta_excludes_transfers():
     by_type = {category["type"]: category["value"] for category in snapshot["categories"]}
     assert by_type["TRANSFERS"] != 0, "the demo fixture deposits monthly, so this must be exercised"
     assert snapshot["absolute_delta"]["amount"] == pytest.approx(
-        by_type["FINAL_VALUE"] - by_type["INITIAL_VALUE"] - by_type["TRANSFERS"], abs=0.01
+        by_type["FINAL_VALUE"] - by_type["INITIAL_VALUE"] - by_type["TRANSFERS"], abs=0.021
     )
 
 
